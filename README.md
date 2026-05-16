@@ -22,10 +22,13 @@ A rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC (Aspect-
 ├── 04_wrds_integrate.py        # Merge CRSP into events_with_returns_wrds.parquet
 ├── 05_wrds_compare.py          # yfinance vs CRSP head-to-head (drives §8a)
 ├── 06_wrds_lookahead_tests.py  # 6 additional tests T9–T14 for the WRDS pipeline
+├── 07_audit_gap_tests.py       # T15–T17: programmatic backstops for audit §3.4 / §3.9 / §3.10
 ├── Makefile                    # One-command reproduce: make all
 ├── build_charts_pdf.py         # Bundles reports/output/*.png into PDF
 ├── reports/
-│   ├── look_ahead_audit.md     # §3 look-ahead bias checklist (required deliverable)
+│   ├── look_ahead_audit.md     # one-page sign-off (markdown source, required deliverable)
+│   ├── look_ahead_audit.pdf    # one-page sign-off (compiled deliverable)
+│   ├── look_ahead_audit_detail.md  # full per-item evidence (supplementary)
 │   ├── research_report.md      # Full research write-up (source for PDF)
 │   ├── research_report.pdf     # Compiled report
 │   ├── backtest_charts.pdf     # 22-figure bundle (committed)
@@ -127,7 +130,7 @@ Mean ingestion lag is **1,658 days** — confirming this field records a batch h
 |------|--------|----------|
 | Data pipeline | ✅ Complete | `00_data_prep.ipynb` |
 | Look-ahead bias audit (10-item checklist §3.1–§3.10, signed) | ✅ Complete | `reports/look_ahead_audit.md` |
-| Formal look-ahead bias tests (8 programmatic tests T1–T8) | ✅ Complete | `02_lookahead_tests.ipynb` |
+| Formal look-ahead bias tests (17 programmatic tests T1–T17) | ✅ Complete | `02_lookahead_tests.ipynb` + `06_wrds_lookahead_tests.py` + `07_audit_gap_tests.py` |
 | Analysis notebook | ✅ Complete | `01_analysis.ipynb` |
 | Research PDF (with embedded figures) | ✅ Complete | `reports/research_report.pdf` |
 | Backtest charts (22 figures) | ✅ Complete | `reports/output/` + `reports/backtest_charts.pdf` |

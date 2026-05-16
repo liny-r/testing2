@@ -3,6 +3,7 @@
 ##        make data         → data prep only (00_data_prep.ipynb)
 ##        make analysis     → analysis notebook (01_analysis.ipynb)
 ##        make tests        → look-ahead bias tests (02_lookahead_tests.ipynb)
+##        make audit_gaps   → run T15–T17 audit-gap tests (07_audit_gap_tests.py)
 ##        make report       → generate PDF from markdown
 ##        make charts       → bundle PNGs into backtest_charts.pdf
 ##        make wrds         → optional: WRDS / CRSP pipeline for PIT RU3K and §8a
@@ -14,9 +15,13 @@ PDF_ENGINE    = xelatex
 PANDOC_FLAGS  = --pdf-engine=$(PDF_ENGINE) -V geometry:margin=1in -V fontsize=11pt \
                 -V "mainfont=STIX Two Text" -V "mathfont=STIX Two Math"
 
-.PHONY: all data analysis tests report charts wrds clean
+.PHONY: all data analysis tests audit_gaps report charts wrds clean
 
-all: data analysis tests report charts
+all: data analysis tests audit_gaps report charts
+
+## ── Audit gap tests T15–T17 (closes inspection-only gaps from §3.4, §3.9, §3.10)
+audit_gaps: data/events_with_returns.parquet 07_audit_gap_tests.py
+	$(PYTHON) 07_audit_gap_tests.py
 
 ## ── Step 1: data pipeline ─────────────────────────────────────────────────
 data/events_with_returns.parquet: 00_data_prep.ipynb

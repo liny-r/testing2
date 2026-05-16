@@ -643,23 +643,36 @@ The strategy **breaks even near 20 bps one-way** (≈ 80 bps round-trip for a 4-
 
 # 6. Recommended Deployment
 
-**Universe:** S&P 1500 (net Sharpe +0.87, max DD −31.2%, ~1,500 names). SP500 is the conservative choice for large AUM (net Sharpe +0.73); RU3K-PIT (+1.69) is capacity-constrained (~$50M AUM) under realistic TC but delivers the strongest signal.
+**Deployment context decides the model choice.** Two configurations are recommended; the right one depends on whether the trading book scores a single universe or pools across all three simultaneously.
 
-**Cadence:** Monthly for all universes — the only cadence with positive net Sharpe across all three. SP500 daily is TC-destroyed (net Sharpe −0.03). For RU3K-PIT, monthly (+1.69) is close to daily (+1.83) while carrying only −11.1% vs −49.3% max DD — a far better risk-adjusted outcome. SP1500 daily (+1.02) marginally exceeds monthly (+0.87) but at 3× the drawdown — not justified under flat 5 bps TC. *Revisit if point-in-time TC modeling validates <3 bps one-way.*
+### A. Single-universe deployment (recommended default)
 
-**Holding period:** 20d primary (positions expire naturally at monthly rebalance, minimising overlap). Sensitivity analysis confirms 20d is the optimal horizon across all universes (§5.6C).
+Use the **raw `ATCClassifierScore`** with no ML layer.
 
-**Bucket structure:** Quintile (5 buckets) — near-optimal at +0.73 net Sharpe; octile (+0.71) provides no material improvement (§5.6B).
+- **Best universe:** S&P 1500, monthly, 20d hold, quintile L/S → net Sharpe **+0.87**, max DD −31.2%, ~187 names per leg.
+- **Why no ML:** per-universe walk-forward (§5.3b-B) shows the ATC baseline beats Enhanced Ridge in SP500 (+0.66 vs +0.25) and RU3K-PIT (+0.52 vs +0.44), and both are negative in SP1500. The 772 engineered features add noise once predictions are filtered to a single universe's tickers.
+- **Alternative universes:** SP500 (+0.66) is the conservative large-AUM choice; RU3K-PIT (+0.52 per-universe, +1.69 quintile-portfolio gross) is capacity-constrained but delivers the strongest signal.
 
-**Model:** Enhanced Ridge on 772 engineered features (all-universe Sharpe +0.83, IC IR +0.57). Retrain quarterly on expanding window; no sparse feature selection required. For IC-optimised scoring, Combo LightGBM (772 + 30 per-fold IC-selected sparse cells, IC IR +1.14) adds predictive power but is sensitive to SP500 sample sizes. For SP500-specific deployment, the raw ATCClassifierScore (Sharpe +0.60, +59 bps/month) is the most reliable baseline.
+### B. Multi-universe pooled book
 
-**Position sizing:** Rank-proportional, volatility-scaled weights within each quintile (weight proportional to rank-deviation / trailing 60d σ_i), capped at 3× equal-weight. 200% gross, market-neutral; target 6–10% annualized vol.
+Use **Enhanced Ridge** on 772 engineered features, scoring SP500+SP1500+RU3K simultaneously.
 
-*Note on backtest vs. recommended sizing:* §5 backtests use equal-weight quintile L/S construction (the cleanest comparison across model tiers and universes). The recommended rank-proportional, vol-scaled rule is a production refinement that typically lowers realised vol by 10–25% without materially shifting Sharpe (the rank ordering — not the within-quintile weighting — drives the alpha). Practitioners can also revert to equal-weight without invalidating the backtest results.
+- **Performance:** all-universe Sharpe **+0.83** vs ATC baseline +0.75 (§5.3b-A), IC IR +0.57.
+- **Why Ridge wins here:** cross-universe pooled scores produce a consistent ranking where the extreme quintiles are dominated by names that score high across all three universes; filtering to any one universe destroys this effect (per §5.3b-B). Use this configuration only if the trading book genuinely allocates across all three universes at the same time.
+- **IC-optimised variant:** Combo LightGBM (772 + 30 per-fold IC-selected sparse cells, IR +1.14) adds predictive power if quintile granularity is replaced with continuous score-weighted positions.
 
-**Capacity:** ~$150–300M AUM at SP1500 scale (187 names per leg, ~18 bps/month net alpha, 20 bps round-trip TC).
+### Parameters common to both configurations
 
-**Monitor:** (1) Rolling 8-quarter IC per tier — flag if it falls below +0.01. (2) TC break-even at ~20 bps one-way (§5.6A); scale down if AUM growth pushes costs toward that level. (3) Compare Ridge vs. LGB trailing Sharpe quarterly — regime shifts alter which model leads.
+- **Cadence:** Monthly — the only cadence with positive net Sharpe across all three universes. SP500 daily is TC-destroyed (−0.03). RU3K daily (+1.83) marginally exceeds monthly (+1.69) but at 4× the max drawdown. *Revisit daily if point-in-time TC modeling validates <3 bps one-way.*
+- **Holding period:** 20d (positions expire naturally at monthly rebalance). Sensitivity analysis confirms 20d is the empirical optimum across all universes (§5.6C).
+- **Bucket structure:** Quintile (5 buckets) — near-optimal at +0.73 net Sharpe; octile (+0.71) adds no improvement (§5.6B).
+- **Position sizing:** Rank-proportional, volatility-scaled within each quintile (weight proportional to rank-deviation / trailing 60d σ_i), capped at 3× equal-weight. 200% gross, market-neutral; target 6–10% annualized vol.
+
+*Note on backtest vs recommended sizing:* §5 backtests use equal-weight quintile L/S (the cleanest cross-tier comparison). The recommended rank-proportional, vol-scaled rule typically lowers realised vol by 10–25% without materially shifting Sharpe — rank ordering, not within-quintile weighting, drives the alpha. Practitioners can revert to equal-weight without invalidating the backtest.
+
+**Capacity:** ~$150–300M AUM at SP1500 scale (~18 bps/month net alpha, 20 bps round-trip TC); ~$50M at RU3K-PIT scale under realistic small-cap TC.
+
+**Monitor:** (1) Rolling 8-quarter IC per tier — flag if it falls below +0.01. (2) TC break-even at ~20 bps one-way (§5.6A); scale down if AUM growth pushes costs toward that level. (3) Compare per-universe ATC baseline vs all-universe Ridge trailing Sharpe quarterly — regime shifts alter which configuration leads.
 
 
 # 7. Risks and Limitations
@@ -710,7 +723,7 @@ For prices, the published §5 uses yfinance (the original pipeline) to keep the 
 
 # 9. Conclusion
 
-The ProntoNLP ATC signal has genuine, statistically significant alpha (IC t-stat >> 3 across all universes and horizons). Monthly quintile L/S portfolios deliver net Sharpe 0.73–1.69 (yfinance prices + PIT Russell universe), with the §8a CRSP-native run pushing RU3K to 2.52; the signal is strongest in RU3K and most capacity-efficient in SP1500. Expanding walk-forward evaluation shows that ML adds value selectively: Enhanced Ridge achieves all-universe Sharpe +0.83 vs. ATC baseline +0.75, and Combo LightGBM leads on IC with IR +1.14 (p=0.002). For SP500, the raw ATC signal (+0.60 Sharpe) outperforms all ML models — per-fold sparse feature selection variance degrades rankings at small fold sizes. The 2-quarter ATC trend is the single most important feature. The primary risk is post-COVID signal decay; ML provides no additional resilience at 20d in the post-2022 regime, making rolling IC monitoring essential. Recommended deployment: S&P 1500, monthly rebalancing, 20d hold, quintile buckets, Enhanced Ridge scoring, $150–300M AUM capacity.
+The ProntoNLP ATC signal has genuine, statistically significant alpha (IC t-stat >> 3 across all universes and horizons). Monthly quintile L/S portfolios deliver net Sharpe 0.73–1.69 (yfinance prices + PIT Russell universe), with the §8a CRSP-native run pushing RU3K to 2.52; the signal is strongest in RU3K and most capacity-efficient in SP1500. Expanding walk-forward evaluation shows that ML adds value selectively: Enhanced Ridge achieves all-universe Sharpe +0.83 vs. ATC baseline +0.75, and Combo LightGBM leads on IC with IR +1.14 (p=0.002). For SP500, the raw ATC signal (+0.60 Sharpe) outperforms all ML models — per-fold sparse feature selection variance degrades rankings at small fold sizes. The 2-quarter ATC trend is the single most important feature. The primary risk is post-COVID signal decay; ML provides no additional resilience at 20d in the post-2022 regime, making rolling IC monitoring essential. Recommended deployment: S&P 1500, monthly rebalancing, 20d hold, quintile buckets, $150–300M AUM capacity — using raw `ATCClassifierScore` for any single-universe book, or Enhanced Ridge only when scoring is genuinely pooled across SP500+SP1500+RU3K simultaneously (see §6).
 
 
 # References
