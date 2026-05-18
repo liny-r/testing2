@@ -20,7 +20,7 @@ A rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC (Aspect-
 ├── 02_lookahead_tests.ipynb    # 8 programmatic look-ahead tests T1–T8 (all pass)
 ├── 03_wrds_pull.py             # WRDS pull: CRSP prices + Russell 3000 PIT proxy (optional)
 ├── 04_wrds_integrate.py        # Merge CRSP into events_with_returns_wrds.parquet
-├── 05_wrds_compare.py          # yfinance vs CRSP head-to-head (drives §8a)
+├── 05_wrds_compare.py          # yfinance vs CRSP head-to-head (validation script; results no longer reported in §5 now that CRSP-first is primary)
 ├── 06_wrds_lookahead_tests.py  # 6 additional tests T9–T14 for the WRDS pipeline
 ├── 07_audit_gap_tests.py       # T15–T17: programmatic backstops for audit §3.4 / §3.9 / §3.10
 ├── Makefile                    # One-command reproduce: make all
@@ -32,7 +32,7 @@ A rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC (Aspect-
 │   ├── research_report.md      # Full research write-up (source for PDF)
 │   ├── research_report.pdf     # Compiled report
 │   ├── backtest_charts.pdf     # 22-figure bundle (committed)
-│   └── output/                 # 25 PNG figures (committed, regenerable)
+│   └── output/                 # 23 PNG figures (committed, regenerable)
 ├── data/
 │   ├── universes.json          # SP500 / SP1500 / RU3K ticker lists (committed)
 │   ├── wrds_sp_constituents.parquet     # WRDS S&P current constituents (small, committed)
@@ -61,27 +61,35 @@ conda create -n atc python=3.11 -y
 conda activate atc
 pip install pandas pyarrow yfinance lightgbm xgboost scikit-learn \
             tqdm requests jupyter nbconvert matplotlib scipy pandoc
-# Optional (only needed for the WRDS / CRSP validation pipeline, §8a):
+# Optional (only needed if you want to re-run the WRDS / CRSP pull from scratch):
 pip install wrds psycopg2-binary
 
 # 3. Place the raw CSV in the project root
 #    Earnings_ATC_until_2026-04-21.csv (~4.5 GB) — request from instructor
 
 # 4. Run everything
-make all    # data prep → analysis → look-ahead tests → PDF report → charts PDF
+make all    # → reproduces all results from cached parquets, NO data downloads
+make fresh  # → full pipeline from scratch, fetches yfinance prices (~90 min)
 ```
 
-`make all` runs the full pipeline end-to-end. Individual targets:
+**Default behaviour:** `make all` produces every deliverable (research PDF, charts PDF, look-ahead audit, walk-forward IC, etc.) from the existing `data/events_with_returns.parquet` and cached PNGs. **No yfinance downloads are triggered.** If every PNG in `reports/output/` is already fresh, the build is just the PDF / chart rebuilds (~3 minutes); if any PNG is missing, `make` will fall back to re-running `01_analysis.ipynb` (~70 minutes).
+
+**Full pipeline from scratch:** `make fresh` runs `00_data_prep` first (which fetches yfinance prices), then everything else. Use this when the data parquets are not yet built.
+
+Individual targets:
 
 | Target | What it does |
 |--------|-------------|
-| `make data` | Run `00_data_prep.ipynb` (CSV → Parquet, ~30–60 min) |
-| `make analysis` | Run `01_analysis.ipynb` (IC, portfolios, models, ~20–30 min) |
-| `make tests` | Run `02_lookahead_tests.ipynb` (look-ahead audit, ~2 min) |
-| `make report` | Compile `reports/research_report.pdf` via pandoc |
-| `make charts` | Build `reports/backtest_charts.pdf` from PNGs |
-| `make clean` | Remove generated Parquet files and PNGs |
-| `make wrds` | (optional) Run the full WRDS pipeline: `03_wrds_pull.py` → `04_wrds_integrate.py` → `05_wrds_compare.py` → `06_wrds_lookahead_tests.py`. Requires WRDS credentials (~30 min for the price pull) |
+| `make all` | **Default.** Reproduce all results from cached parquets. No downloads. |
+| `make fresh` | Full pipeline including `00_data_prep.ipynb` yfinance fetch (~90 min). |
+| `make data` | Run `00_data_prep.ipynb` only (CSV → Parquet, fetches yfinance, ~30–60 min). |
+| `make analysis` | Run `01_analysis.ipynb` only (IC, portfolios, walk-forward ML, ~70 min). |
+| `make tests` | Run `02_lookahead_tests.ipynb` (T1–T8 look-ahead audit, ~2 min). |
+| `make audit_gaps` | Run T15–T17 audit-gap tests (`07_audit_gap_tests.py`). |
+| `make report` | Compile `reports/research_report.pdf` via pandoc. |
+| `make charts` | Build `reports/backtest_charts.pdf` from PNG bundle. |
+| `make clean` | Remove generated Parquet files and PNGs. |
+| `make wrds` | (optional) Run the full WRDS pipeline: `03_wrds_pull.py` → `04_wrds_integrate.py` → `05_wrds_compare.py` → `06_wrds_lookahead_tests.py`. Requires WRDS credentials (~30 min for the price pull). |
 
 ### Manual step-by-step
 
@@ -116,7 +124,7 @@ make all    # data prep → analysis → look-ahead tests → PDF report → cha
 Mean ingestion lag is **1,658 days** — confirming this field records a batch historical backfill, not real-time data availability. Entry dates are based on `MOSTIMPORTANTDATEUTC` only. This choice is documented in `00_data_prep.ipynb` cell 18 and in the look-ahead audit.
 
 ### Universe membership
-- **Russell 3000** is point-in-time: CRSP top-3000 by market cap, annual June reconstitution — survivorship-free (auto-loaded when the WRDS-enriched events file exists; falls back to a current-composition exchange-flag proxy otherwise). See §8a in the research PDF.
+- **Russell 3000** is point-in-time: CRSP top-3000 by market cap, annual June reconstitution — survivorship-free (auto-loaded from `events_with_returns_wrds.parquet`; falls back to a current-composition exchange-flag proxy if WRDS data is unavailable). Prices use a **CRSP-first preference with yfinance fallback** for full coverage of delisted small-caps. See §2.4 / §2.5 in the research PDF.
 - **S&P 500 / 1500** use **current (2026) composition** from Wikipedia (Compustat tier accessible did not include historical removed members). The S&P survivorship-bias caveat is stated explicitly in research report §7; reported S&P alpha is an upper bound (per handout §6.3).
 
 ### Transaction costs
@@ -133,7 +141,7 @@ Mean ingestion lag is **1,658 days** — confirming this field records a batch h
 | Formal look-ahead bias tests (17 programmatic tests T1–T17) | ✅ Complete | `02_lookahead_tests.ipynb` + `06_wrds_lookahead_tests.py` + `07_audit_gap_tests.py` |
 | Analysis notebook | ✅ Complete | `01_analysis.ipynb` |
 | Research PDF (with embedded figures) | ✅ Complete | `reports/research_report.pdf` |
-| Backtest charts (22 figures) | ✅ Complete | `reports/output/` + `reports/backtest_charts.pdf` |
+| Backtest charts (20 figures) | ✅ Complete | `reports/output/` + `reports/backtest_charts.pdf` |
 | One-command reproducibility | ✅ Complete | `Makefile` — run `make all` |
-| PIT Russell 3000 (WRDS / CRSP, survivorship-free) — primary RU3K | ✅ Complete | `03_wrds_pull.py` → `04_wrds_integrate.py`; report §8a |
+| PIT Russell 3000 (WRDS / CRSP, survivorship-free) — primary RU3K | ✅ Complete | `03_wrds_pull.py` → `04_wrds_integrate.py`; report §2.4 / §2.5 |
 | WRDS-pipeline look-ahead audit (T9–T14) | ✅ Complete | `06_wrds_lookahead_tests.py` |

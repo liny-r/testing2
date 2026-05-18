@@ -99,10 +99,10 @@ The sections below give the full implementation detail for each audit item. The 
 - **S&P 500 and S&P 1500 use current (2026) composition.** Historical removed members are not available in the Compustat subscription tier accessed (`comp.idxcst_his` returned only `thru_date = NULL` rows). Per handout §6.3's fallback path, the survivorship-bias caveat is documented explicitly in:
   - `00_data_prep.ipynb` cell 10 markdown
   - `reports/research_report.md` §7 (Risks and Limitations)
-  - `reports/research_report.md` §8a (WRDS validation showing the RU3K bias under-stated alpha, not over-stated — gives some prior that the S&P bias may also be modest in magnitude)
+  - `reports/research_report.md` §2.4 / §2.5 (universe and price-data definitions)
   - `README.md` Key Design Decisions
 
-Reported **S&P** alpha should be treated as an upper bound. Russell 3000 alpha is survivorship-free in universe assignment (price coverage gaps are a separate, smaller-magnitude effect — see §8a).
+Reported **S&P** alpha should be treated as an upper bound. Russell 3000 alpha is survivorship-free in both universe assignment and price coverage (CRSP-first preference; see research report §2.4).
 
 **Status: ✅ PASS** (RU3K is fully PIT; S&P caveat explicitly documented per handout §6.3)
 

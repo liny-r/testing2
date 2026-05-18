@@ -1,13 +1,22 @@
 ## Backtesting the ProntoNLP Earnings-Call ATC Signal
-## Usage: make all          → run full pipeline from CSV to PDF
-##        make data         → data prep only (00_data_prep.ipynb)
-##        make analysis     → analysis notebook (01_analysis.ipynb)
-##        make tests        → look-ahead bias tests (02_lookahead_tests.ipynb)
-##        make audit_gaps   → run T15–T17 audit-gap tests (07_audit_gap_tests.py)
-##        make report       → generate PDF from markdown
-##        make charts       → bundle PNGs into backtest_charts.pdf
-##        make wrds         → optional: WRDS / CRSP pipeline for PIT RU3K and §8a
-##        make clean        → remove generated Parquet / PNG files
+##
+## Default target:
+##   make all          → reproduce ALL results from existing data parquets
+##                       (no downloads; assumes data/events_with_returns.parquet exists)
+##
+## Full pipeline from scratch (with downloads):
+##   make fresh        → data + analysis + tests + audit_gaps + report + charts
+##                       (≈ 90 min; fetches yfinance prices via 00_data_prep)
+##
+## Individual targets:
+##   make data         → data prep only (00_data_prep.ipynb; fetches yfinance prices)
+##   make analysis     → analysis only (01_analysis.ipynb; ≈ 70 min)
+##   make tests        → look-ahead bias tests (02_lookahead_tests.ipynb)
+##   make audit_gaps   → audit-gap tests T15–T17 (07_audit_gap_tests.py)
+##   make report       → research_report.pdf from markdown
+##   make charts       → backtest_charts.pdf from PNG bundle
+##   make wrds         → optional: WRDS / CRSP pull + integration + audit (T9–T14)
+##   make clean        → remove generated Parquet / PNG files
 
 PYTHON        = python
 JUPYTER_FLAGS = --to notebook --execute --inplace --ExecutePreprocessor.timeout=7200
@@ -15,49 +24,62 @@ PDF_ENGINE    = xelatex
 PANDOC_FLAGS  = --pdf-engine=$(PDF_ENGINE) -V geometry:margin=1in -V fontsize=11pt \
                 -V "mainfont=STIX Two Text" -V "mathfont=STIX Two Math"
 
-.PHONY: all data analysis tests audit_gaps report charts wrds clean
+.PHONY: all fresh data analysis tests audit_gaps report charts wrds clean
 
-all: data analysis tests audit_gaps report charts
+## Default: reproduce all results from cached parquets (no data downloads).
+## If walkforward_ic.png is missing, this will trigger 01_analysis (~70 min);
+## if it's present, only the cheap downstream steps run (~3 min).
+all: analysis tests audit_gaps report charts
+	@echo ""
+	@echo "All deliverables produced. No data downloads were triggered by this build."
+
+## Full pipeline from scratch — re-fetches yfinance prices via 00_data_prep.
+fresh: data analysis tests audit_gaps report charts
 
 ## ── Audit gap tests T15–T17 (closes inspection-only gaps from §3.4, §3.9, §3.10)
-audit_gaps: data/events_with_returns.parquet 07_audit_gap_tests.py
+## Order-only prereq on parquet: existence required, freshness not checked.
+audit_gaps: 07_audit_gap_tests.py | data/events_with_returns.parquet
 	$(PYTHON) 07_audit_gap_tests.py
 
-## ── Step 1: data pipeline ─────────────────────────────────────────────────
+## ── Data pipeline (yfinance fetch) — only run on demand via `make data` or `make fresh`
 data/events_with_returns.parquet: 00_data_prep.ipynb
 	jupyter nbconvert $(JUPYTER_FLAGS) 00_data_prep.ipynb
 
 data: data/events_with_returns.parquet
 
-## ── Step 2: analysis (IC, portfolios, walk-forward, robustness) ───────────
-reports/output/walkforward_ic.png: 01_analysis.ipynb data/events_with_returns.parquet
+## ── Analysis (IC, portfolios, walk-forward, robustness)
+## Order-only prereq on parquet so `make all` does not re-trigger 00_data_prep
+## just because the notebook is newer than the parquet.
+reports/output/walkforward_ic.png: 01_analysis.ipynb | data/events_with_returns.parquet
 	jupyter nbconvert $(JUPYTER_FLAGS) 01_analysis.ipynb
 
 analysis: reports/output/walkforward_ic.png
 
-## ── Step 3: formal look-ahead bias tests ─────────────────────────────────
-reports/look_ahead_audit.md: 02_lookahead_tests.ipynb reports/output/walkforward_ic.png
+## ── Formal look-ahead bias tests (T1–T8)
+reports/look_ahead_audit.md: 02_lookahead_tests.ipynb | reports/output/walkforward_ic.png
 	jupyter nbconvert $(JUPYTER_FLAGS) 02_lookahead_tests.ipynb
 
 tests: reports/look_ahead_audit.md
 
-## ── Step 4: PDF report ────────────────────────────────────────────────────
-reports/research_report.pdf: reports/research_report.md reports/look_ahead_audit.md reports/output/walkforward_ic.png
+## ── Research PDF
+## Order-only prereq on the analysis output: report doesn't re-run analysis
+## just to rebuild the PDF from the markdown.
+reports/research_report.pdf: reports/research_report.md | reports/output/walkforward_ic.png
 	cd reports && pandoc research_report.md \
 		-o research_report.pdf \
 		$(PANDOC_FLAGS)
 
 report: reports/research_report.pdf
 
-## ── Step 5: backtest charts PDF ───────────────────────────────────────────
-reports/backtest_charts.pdf: build_charts_pdf.py reports/output/walkforward_ic.png
+## ── Backtest charts PDF
+reports/backtest_charts.pdf: build_charts_pdf.py | reports/output/walkforward_ic.png
 	$(PYTHON) build_charts_pdf.py
 
 charts: reports/backtest_charts.pdf
 
-## ── Optional: WRDS / CRSP pipeline (requires WRDS credentials) ───────────
+## ── Optional: WRDS / CRSP pipeline (requires WRDS credentials)
 ## Pulls survivorship-free CRSP daily prices and the PIT Russell 3000 proxy,
-## merges them into events_with_returns_wrds.parquet, then runs the §8a
+## merges them into events_with_returns_wrds.parquet, then runs the
 ## yfinance-vs-CRSP comparison and the T9–T14 look-ahead tests.
 ## The price pull (~14.9 M rows) takes ~10–30 minutes the first time.
 data/wrds_prices.parquet: 03_wrds_pull.py
@@ -72,7 +94,7 @@ wrds: data/events_with_returns_wrds.parquet
 	$(PYTHON) 05_wrds_compare.py
 	$(PYTHON) 06_wrds_lookahead_tests.py
 
-## ── Clean generated artefacts (keeps raw CSV and Parquet inputs) ──────────
+## ── Clean generated artefacts (keeps raw CSV and Parquet inputs)
 clean:
 	rm -f data/signals.parquet data/prices.parquet \
 	      data/events_with_returns.parquet data/signal_slices.parquet \

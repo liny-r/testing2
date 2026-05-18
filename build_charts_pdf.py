@@ -38,11 +38,6 @@ FIGURES = [
      "Net decile spread by universe × horizon. Spread grows monotonically from 1d to 20d,\n"
      "consistent with the ATC classifier's 14-day training window."),
 
-    ("quintile_spread.png",
-     "§2a  Quintile Spread Heatmap (Q5−Q1 net, bps)",
-     "Net quintile spread by universe × horizon (monthly rebalance, 20 bps round-trip TC).\n"
-     "RU3K-PIT 20d spread of +115 bps/month leads; quintile is the primary spec used in §6."),
-
     ("alpha_decay.png",
      "§2c  Alpha Decay — IC vs. Return Horizon",
      "Spearman IC of ATCClassifierScore at 1, 3, 5, 10, 20-day horizons (all universes).\n"
@@ -87,7 +82,7 @@ FIGURES = [
     ("wf_portfolio_comparison.png",
      "§4b  Walk-Forward Portfolio — ATC Baseline vs. Ridge vs. LightGBM",
      "Monthly quintile L/S equity curves from OOS walk-forward predictions (all universes,\n"
-     "20 bps round-trip TC). Net Sharpe: Ridge +0.83, ATC Baseline +0.75, LightGBM +0.63."),
+     "20 bps round-trip TC). Net Sharpe: LightGBM +1.79, ATC Baseline +1.06, Ridge +0.77."),
 
     ("wf_subperiod_ir.png",
      "§4d  Walk-Forward IC — Sub-Period Breakdown",
@@ -103,12 +98,7 @@ FIGURES = [
     ("stretch_portfolio_comparison.png",
      "§3d  Portfolio Comparison — All Tiers (SP500, Monthly)",
      "OOS monthly quintile L/S equity curves: ATC Baseline, Enhanced Ridge/LGB,\n"
-     "Combo Ridge/LGB, Combo XGBoost. ATC Baseline (+0.60 Sharpe) is the strongest SP500 portfolio."),
-
-    ("stretch_feature_importance.png",
-     "§3  Combo XGBoost Feature Importance",
-     "Top features in the Combo XGBoost model (772 engineered + 30 per-fold IC-selected sparse).\n"
-     "Sparse AspectTheme cells concentrated in positive FinPerf and CapAlloc language."),
+     "Combo Ridge/LGB, Combo XGBoost. ATC Baseline (+0.59 Sharpe) remains the strongest SP500-only portfolio."),
 
     # ── Robustness ────────────────────────────────────────────────────────
     ("ic_by_cap_bucket.png",
@@ -119,11 +109,11 @@ FIGURES = [
     ("parameter_sensitivity.png",
      "§5.6  Parameter Sensitivity — TC Level / Bucket Count / Return Horizon",
      "(A) Break-even near ~20 bps one-way. (B) Quintile (5 buckets) near-optimal; octile adds no improvement.\n"
-     "(C) 20d holding period maximises net Sharpe (+0.73 vs +0.45 at 10d)."),
+     "(C) 20d holding period maximises net Sharpe (+0.76 vs +0.41 at 10d)."),
 
     ("walkforward_ic.png",
      "§5.3  Walk-Forward IC Summary — All Model Tiers",
-     "Quarterly OOS IC for all 7 model variants (2018Q1–2026Q2). Combo LightGBM IR +1.14\n"
+     "Quarterly OOS IC for all 7 model variants (2018Q1–2026Q2). Combo LightGBM IR +1.51\n"
      "is the leading ML model; ATC baseline IR +1.09 serves as the benchmark floor."),
 ]
 
