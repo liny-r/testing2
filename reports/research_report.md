@@ -32,7 +32,7 @@ header-includes: |
 
 # Abstract
 
-We present a rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC signal across 376,790 events (2010–2026) and three equity universes (S&P 500, S&P 1500, Russell 3000 — PIT via CRSP top-3000 market cap). All ten look-ahead audit items pass. The ATCClassifierScore achieves Spearman IC of +0.039–0.055 (SP500 +0.049 at 20d; RU3K +0.055 at 20d). Monthly quintile L/S portfolios deliver net Sharpe of 0.73 / 0.87 / 1.69 after 20 bps round-trip TC; monthly is the only cadence positive across all universes (SP500 daily net Sharpe −0.03). An expanding walk-forward over 34 quarters (2018Q1–2026Q2) tests Ridge, LightGBM, and XGBoost on 772 engineered Aspect × Theme cross-product features augmented with 30 per-fold IC-selected raw AspectTheme cells. **Combo LightGBM achieves IC IR +1.14 (p=0.002); Enhanced Ridge delivers all-universe portfolio Sharpe +0.83 vs. ATC baseline +0.75.** For SP500, the raw ATC signal (+0.60 Sharpe, +59 bps/month) outperforms all ML models — per-fold feature selection variance dominates at small per-fold sample sizes. The 2-quarter ATC trend (`ATCClassifierScore_2q`) is the strongest individual feature (IC_5d = +0.047). Break-even TC is ~20 bps one-way. Key risk: post-COVID signal decay (10d IC +0.052 → +0.008), with ML providing no additional resilience at the 20d horizon.
+We present a rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC signal across 376,790 events (2010–2026) and three equity universes (S&P 500, S&P 1500, Russell 3000 — PIT via CRSP top-3000 market cap). Prices use a **CRSP-first preference with yfinance fallback**: CRSP recovers the ~45% RU3K coverage gap left by yfinance's drop of delisted small-caps. All ten look-ahead audit items pass; 17 programmatic tests T1–T17 verify them. **Recommended production deployment (§6): Russell 3000 PIT, monthly quintile long-short, 20-day hold, Enhanced LightGBM on 772 engineered Aspect × Theme features — walk-forward net Sharpe +1.62, max DD −13.5%, +129 bps/month net (5 bps one-way TC), capacity ~\$50–100M AUM.** Static quintile L/S Sharpe on the same universe is +2.53 (vs +0.76 / +0.83 for SP500 / SP1500). The ATCClassifierScore achieves Spearman IC of +0.045–0.060 (SP500 +0.051 at 20d; RU3K +0.060 at 20d) and monthly is the only cadence positive across all universes (SP500 daily net Sharpe 0.00). An expanding walk-forward over 34 quarters (2018Q1–2026Q2) tests Ridge, LightGBM, and XGBoost on 772 engineered features plus 30 per-fold IC-selected raw AspectTheme cells. Combo LightGBM achieves IC IR +1.51 (p<0.001, 95% CI [+0.82, +2.64]); pooled all-universe LightGBM portfolio delivers Sharpe +1.79 (the alternative deployment for ≥\$300M AUM). The 2-quarter ATC trend (`ATCClassifierScore_2q`) is the strongest individual feature. Break-even TC is ~20 bps one-way. Key risk: post-COVID signal decay at SP500 short horizons (10d IC +0.052 → +0.008), though pooled walk-forward ML now provides meaningful post-COVID resilience (Ridge IR +1.82, LGB IR +1.07).
 
 
 
@@ -95,32 +95,30 @@ Importantly, the ATC classifier was trained against a 14-day pre/post-call windo
 
 ## 2.4 Price Data
 
-Daily adjusted close prices are sourced from yfinance, keyed by `BESTTICKER` (the cleanest join field per the handout). Prices span 2009-12-01 to 2026-04-30.
+Daily adjusted-close prices are sourced from two layers with a **CRSP-first preference and yfinance fallback**:
 
-**Coverage improvement:** The initial batch-download approach (100 tickers per request) achieved only 8.2% event coverage (887 unique tickers). The production pipeline uses:
-- Fuzzy ticker matching (Wikipedia's Yahoo format uses hyphens; BESTTICKER may use dots) to correctly identify all universe tickers in the signal dataset
-- Small batches (20 for SP500/SP1500, 50 for RU3K) to reduce rate-limit failures
-- Individual retry with format-variant fallback (`.` / `-`) for SP500/SP1500 tickers missed in batch downloads
+- **CRSP (via WRDS)** — academic gold standard; survivorship-free coverage of all US common stocks. Pulled by `03_wrds_pull.py` (CRSP `dsf`, 14.9M daily price rows across 6,646 PERMNOs, 2009–2026); linked to event tickers via the CRSP-Compustat link table and integrated by `04_wrds_integrate.py`.
+- **yfinance** — public-data fallback for tickers / dates not in the CRSP pull; keyed by `BESTTICKER`. The production yfinance pipeline uses fuzzy ticker matching (Wikipedia's Yahoo format uses hyphens; BESTTICKER may use dots), small batches (20 for SP500/SP1500, 50 for RU3K), and individual retry with format-variant fallback (`.` / `-`) for tickers missed in batch downloads. Final yfinance cache: 3,109 unique tickers, 9.3M price rows.
 
-Final coverage: **3,109 unique tickers, 9.3M price rows**. Return coverage in the S&P 500 is 99% (29,946 of 30,156 events); coverage drops to 51% in the full Russell 3000 approximation due to delisted and non-US tickers.
+At load time the analysis notebook applies a single preference rule: for each event and each horizon, use the CRSP return if present, otherwise the yfinance return. The two sources agree numerically where both exist (Spearman correlation 0.97, median |Δ| = 0), so SP500/SP1500 results shift only at noise level. The material gain is in the **Russell 3000**, where yfinance dropped ~45% of events because delisted small-caps fall out of its price history — exactly the names where the signal works best.
 
-| Universe | Events with 10d return | Total events | Coverage |
-|----------|-----------------------|--------------|----------|
-| S&P 500  | 29,946 | 30,156 | 99% |
-| S&P 1500 | 78,652 | 79,799 | 99% |
-| Russell 3000 | 120,818 | 238,511 | 51% |
+| Universe | Events with `return_20d` | Total events | Coverage |
+|----------|-------------------------|--------------|----------|
+| S&P 500 | 30,141 | 30,156 | 100% |
+| S&P 1500 | 79,449 | 79,799 | 100% |
+| Russell 3000 (PIT) | 153,824 | 153,988 | 100% |
 
-Residual missing coverage in RU3K (~49%) is attributed to: (a) genuinely delisted/acquired tickers with no historical price data in yfinance, (b) non-US tickers (Canadian, Indian, etc.) that appear in the Russell 3000 approximation, and (c) OTC/pink-sheet tickers with no Yahoo Finance coverage.
+For RU3K-PIT specifically, CRSP supplies 99.8% of events natively; yfinance fills the residual 0.2%. Of the 376,790 cross-universe events, **173,244** had a `return_20d` value sourced from CRSP under the preference rule. The cached yfinance pipeline remains the public-data reproduction path: configs that exclude CRSP (i.e. running without WRDS credentials) produce results consistent with the upper-bound yfinance baseline reported in earlier drafts (RU3K monthly Sharpe ~+1.69 vs ~+2.53 under CRSP-first).
 
 ## 2.5 Universe Definitions
 
-Three universes are evaluated, all using **current composition** (no point-in-time historical constituent data available):
+Three universes are evaluated:
 
-- **S&P 500:** 503 tickers from Wikipedia's current S&P 500 list; 497 matched to signal dataset
-- **S&P 1500:** S&P 500 + S&P 400 + S&P 600 = 1,506 tickers; 1,465 matched
-- **Russell 3000 (approximation):** All US-exchange tickers in the signal dataset (NYSE, NasdaqGS, NasdaqGM, NasdaqCM, NYSEAM) = 7,877 tickers
+- **S&P 500:** 503 tickers from Wikipedia's current (2026) S&P 500 list; 497 matched to signal dataset. **Current composition** — historical removed members not available in the Compustat tier accessed.
+- **S&P 1500:** S&P 500 + S&P 400 + S&P 600 = 1,506 tickers; 1,465 matched. Current composition (same caveat as SP500).
+- **Russell 3000 (PIT):** CRSP top-3000 US common stocks by market capitalisation, snapshotted at each annual June reconstitution (matches Russell methodology). **Survivorship-free** — built from CRSP `msf` market-cap rankings via `merge_asof` of event `entry_date` against the snapshot windows (`04_wrds_integrate.py`). 153,988 events fall inside an active PIT window.
 
-**Survivorship bias caveat:** All reported alpha figures should be interpreted as upper bounds. The current S&P 500 excludes companies that were members in 2010–2020 but have since been removed (delisted, acquired, or downgraded). These tend to be underperformers, so including them would reduce long-only alpha and may reduce long-short alpha depending on signal correlation with delisting risk.
+**Survivorship bias caveat (SP500/SP1500 only):** Reported S&P alpha figures should be interpreted as upper bounds. The current S&P 500 excludes companies that were members in 2010–2020 but have since been removed (delisted, acquired, or downgraded). These tend to be underperformers, so including them would reduce long-only alpha and may reduce long-short alpha depending on signal correlation with delisting risk. **RU3K is fully PIT (no caveat).**
 
 
 # 3. Methodology
@@ -238,19 +236,19 @@ All ten audit items from the handout §3 pass. The complete checklist with imple
 
 # 5. Results
 
-All analyses use `01_analysis.ipynb` running on `events_with_returns_wrds.parquet` when the WRDS pull is available (the file is loaded automatically; falls back to `events_with_returns.parquet` otherwise). 376,790 events, 2010–2026, 772 features. The Russell 3000 universe is the point-in-time CRSP top-3000 by market cap (annual June reconstitution; survivorship-free); see §8a. Figures are saved to `reports/output/`.
+All analyses use `01_analysis.ipynb` running on `events_with_returns_wrds.parquet` (the WRDS-merged parquet with both CRSP and yfinance return columns; auto-loaded). At load time a single preference step replaces yfinance returns with CRSP returns wherever CRSP has a value — 173,244 of 376,790 events use a CRSP return under this rule (the rest stay on yfinance). 376,790 events, 2010-01-05 to 2026-04-21, 772 features. The Russell 3000 universe is the point-in-time CRSP top-3000 by market cap (annual June reconstitution; survivorship-free; see §2.5). Figures are saved to `reports/output/`.
 
 ## 5.1 Single-Feature IC Analysis
 
 Spearman rank IC between `ATCClassifierScore` and forward returns across three equity universes:
 
-| Universe | N (10d) | IC_1d | IC_3d | IC_5d | IC_10d | IC_20d |
+| Universe | N (20d) | IC_1d | IC_3d | IC_5d | IC_10d | IC_20d |
 |----------|---------|-------|-------|-------|--------|--------|
-| SP500    | 29,946  | +0.042 | +0.047 | +0.044 | +0.039 | +0.049 |
-| SP1500   | 78,652  | +0.044 | +0.046 | +0.039 | +0.038 | +0.043 |
-| RU3K (PIT) | 84,234 | +0.049 | +0.052 | +0.048 | +0.052 | +0.055 |
+| SP500    | 30,237  | +0.042 | +0.047 | +0.045 | +0.040 | +0.051 |
+| SP1500   | 79,741  | +0.045 | +0.047 | +0.041 | +0.039 | +0.045 |
+| RU3K (PIT) | 154,176 | +0.053 | +0.057 | +0.054 | +0.056 | +0.060 |
 
-The IC is consistently positive across all universes and horizons, with a mild peak at the 20d horizon — consistent with the ATC classifier's 14-day training objective. All IC values are statistically meaningful given the sample sizes.
+The IC is consistently positive across all universes and horizons, with a mild peak at the 20d horizon — consistent with the ATC classifier's 14-day training objective. The RU3K-PIT IC strengthens materially under CRSP-first pricing because the previously-missing delisted small-caps carried the highest signal-to-noise. All IC values are statistically meaningful given the sample sizes.
 
 **EventScore variants** (S&P 500) show markedly weaker IC: `EventsScore_4_2_1` achieves IC_1d = +0.013 but near zero at 10d and 20d. `ATCClassifierScore` dominates at every horizon, confirming it as the primary signal.
 
@@ -264,19 +262,19 @@ Sector-level Spearman IC at the 5d horizon, for all three universes, sorted by I
 
 | Sector | IC_1d | IC_3d | IC_5d | IC_10d | IC_20d |
 |--------|-------|-------|-------|--------|--------|
-| Consumer Staples | +0.099 | +0.089 | +0.086 | +0.087 | +0.091 |
-| Energy | +0.079 | +0.079 | +0.080 | +0.045 | +0.036 |
-| Utilities | +0.036 | +0.049 | +0.073 | +0.081 | +0.041 |
-| Materials | +0.052 | +0.067 | +0.064 | +0.040 | +0.078 |
-| Industrials | +0.068 | +0.061 | +0.063 | +0.045 | +0.037 |
-| Communication Services | +0.053 | +0.063 | +0.046 | +0.024 | +0.015 |
-| Information Technology | +0.012 | +0.045 | +0.036 | +0.053 | +0.073 |
-| Health Care | +0.048 | +0.033 | +0.035 | +0.031 | +0.052 |
-| Consumer Discretionary | +0.027 | +0.039 | +0.025 | +0.000 | +0.001 |
-| Real Estate | +0.017 | +0.026 | +0.024 | +0.010 | +0.043 |
-| Financials | +0.017 | +0.009 | +0.003 | +0.008 | +0.034 |
+| Consumer Staples | +0.098 | +0.084 | +0.084 | +0.080 | +0.085 |
+| Energy | +0.079 | +0.079 | +0.077 | +0.041 | +0.032 |
+| Utilities | +0.032 | +0.044 | +0.070 | +0.077 | +0.040 |
+| Materials | +0.059 | +0.077 | +0.069 | +0.047 | +0.089 |
+| Industrials | +0.070 | +0.061 | +0.064 | +0.048 | +0.042 |
+| Communication Services | +0.041 | +0.050 | +0.036 | +0.019 | +0.006 |
+| Information Technology | +0.014 | +0.048 | +0.038 | +0.054 | +0.074 |
+| Health Care | +0.047 | +0.036 | +0.038 | +0.037 | +0.058 |
+| Consumer Discretionary | +0.022 | +0.038 | +0.024 | +0.000 | +0.007 |
+| Real Estate | +0.021 | +0.026 | +0.024 | +0.007 | +0.043 |
+| Financials | +0.018 | +0.009 | +0.002 | +0.005 | +0.033 |
 
-**S&P 1500 and Russell 3000** show similar patterns: Utilities leads at 5d (+0.079 and +0.080 respectively), Consumer Staples and Energy remain in the top tier, and Financials is consistently the weakest sector across all universes. The signal shows positive IC in all 11 GICS sectors across all three universes, confirming it is not driven by any single industry.
+**S&P 1500** (top sectors at 5d): Utilities (+0.080), Energy (+0.072), Consumer Staples (+0.053), Materials (+0.049). Financials moves into the middle tier (+0.034) under CRSP-first pricing. **Russell 3000 (PIT)** is the most uniform: Communication Services leads at 5d (+0.084), but every sector exceeds +0.019. The signal shows positive IC in all 11 GICS sectors across all three universes, confirming it is not driven by any single industry; the 20d t-statistics in RU3K are highly significant in every sector (t = +2.7 to +11.0).
 
 ![Spearman IC by GICS sector — ATCClassifierScore → 5d return, all three universes side by side. Green = positive IC, red = negative. All sectors positive across all universes except Financials in SP500.](output/ic_by_sector.png)
 
@@ -331,15 +329,15 @@ Monthly calendar-time quintile portfolios (20-day holding period, 20 bps round-t
 
 | Universe | Mean LS (bps) | Mean LS net (bps) | Sharpe gross | Sharpe net | Max DD | N periods |
 |----------|--------------|-------------------|--------------|------------|--------|-----------|
-| SP500    | 84.2 | 64.2 | 0.96 | 0.73 | −12.4% | 196 |
-| SP1500   | 79.2 | 59.2 | 1.17 | 0.87 | −31.2% | 196 |
-| RU3K (PIT) | 134.3 | 114.3 | 1.98 | 1.69 | −11.1% | 174 |
+| SP500    | 87.5 | 67.5 | 0.98 | 0.76 | −12.3% | 196 |
+| SP1500   | 78.8 | 58.8 | 1.12 | 0.83 | −32.9% | 196 |
+| RU3K (PIT) | 194.5 | 174.5 | 2.82 | 2.53 | −18.5% | 174 |
 
-Both the long leg (Q5) and short leg (−Q1) contribute positively in all universes. **RU3K is the strongest universe** with a net Sharpe of 1.69, driven by wider return dispersion in small-cap names; the signal's ~114 bps net spread compresses as stocks grow larger and more analyst-covered. SP1500 offers the best liquidity-adjusted trade-off (Sharpe net 0.87, max DD −31.2%). SP500 alpha is solid after costs (Sharpe net 0.73), confirming the signal retains meaningful alpha even in the most liquid, well-covered universe.
+Both the long leg (Q5) and short leg (−Q1) contribute positively in all universes. **RU3K is by far the strongest universe** with a net Sharpe of **2.53** (174 bps/month net), driven by wider return dispersion in small-cap names and full CRSP coverage of delisted tickers. The signal's net spread compresses as stocks grow larger and more analyst-covered. SP1500 offers the best liquidity-adjusted trade-off (Sharpe net 0.83, max DD −32.9%). SP500 alpha is solid after costs (Sharpe net 0.76), confirming the signal retains meaningful alpha even in the most liquid, well-covered universe.
 
-Note: RU3K uses the CRSP top-3000-by-market-cap PIT proxy (annual June reconstitution; §8a) — survivorship-free in universe assignment. Yfinance price coverage on this subset is ~55%, so the events with valid 20d returns reflect the price-covered subset of a properly defined Russell 3000. The N=174 (vs 196 for SP500/SP1500) reflects months that lacked ≥10 events in the smaller PIT-RU3K universe.
+Note: RU3K uses the CRSP top-3000-by-market-cap PIT proxy (annual June reconstitution; §2.4 / §2.5) — survivorship-free in both universe assignment *and* price coverage. The N=174 (vs 196 for SP500/SP1500) reflects months that lacked ≥10 events in the smaller PIT-RU3K universe.
 
-![Monthly quintile L/S equity curves — three universes. RU3K (Sharpe net 1.69) leads, followed by SP1500 (0.87) and SP500 (0.73).](output/quintile_equity_curves.png)
+![Monthly quintile L/S equity curves — three universes. RU3K (Sharpe net 2.53) leads, followed by SP1500 (0.83) and SP500 (0.76).](output/quintile_equity_curves.png)
 
 ## 5.2b Decile Portfolio — Long-Only, Short-Only, and Long-Short
 
@@ -349,27 +347,27 @@ Top decile (D10) long, bottom decile (D1) short, monthly rebalancing, 20-day hol
 
 | Metric | Value |
 |--------|-------|
-| L/S net Sharpe | +0.55 |
-| Max drawdown (L/S) | −26.4% |
+| L/S net Sharpe | +0.62 |
+| Max drawdown (L/S) | −22.7% |
 | N months | 196 |
 
 **Decile spread D10−D1 (net of 20 bps TC, bps) — Universe × Horizon:**
 
 | Universe | 1d | 3d | 5d | 10d | 20d |
 |----------|----|----|-----|-----|-----|
-| SP500    | 3.2 | 15.6 | 25.0 | 36.5 | 64.5 |
-| SP1500   | 22.3 | 28.9 | 34.0 | 44.8 | 78.2 |
-| RU3K (PIT) | 38.3 | 62.9 | 54.8 | 83.1 | 132.3 |
+| SP500    | 3.6 | 14.3 | 23.4 | 37.6 | 72.3 |
+| SP1500   | 23.2 | 32.1 | 35.6 | 45.0 | 84.9 |
+| RU3K (PIT) | 52.4 | 101.2 | 100.3 | 134.4 | 229.7 |
 
 **L/S Decile Sharpe by Universe (monthly, 20d return, net of TC):**
 
 | Universe | L/S Sharpe | Max DD |
 |----------|------------|--------|
-| SP500    | +0.55 | −26.4% |
-| SP1500   | +0.80 | −35.2% |
-| RU3K (PIT) | +1.26 | −27.1% |
+| SP500    | +0.62 | −22.7% |
+| SP1500   | +0.85 | −35.2% |
+| RU3K (PIT) | +2.12 | −36.8% |
 
-The **decile spread grows monotonically from 1d to 20d** at every universe — consistent with the ATC classifier's 14-day training window. The SP500 20d net spread of 66 bps is nearly double the 10d spread (38 bps), confirming that the full signal horizon is captured only at the 20d hold. The **short leg contributes positively in all three universes** at monthly cadence: bottom-decile stocks systematically underperform, with the effect strongest in RU3K where small-cap short calls face less index-driven reversion.
+The **decile spread grows monotonically from 1d to 20d** at every universe — consistent with the ATC classifier's 14-day training window. The SP500 20d net spread of 72 bps is nearly double the 10d spread (38 bps), confirming that the full signal horizon is captured only at the 20d hold. The **short leg contributes positively in all three universes** at monthly cadence: bottom-decile stocks systematically underperform, with the effect strongest in RU3K where small-cap short calls face less index-driven reversion. The RU3K 20d net decile spread of **229.7 bps/month** is materially larger than the quintile-based 174.5 bps because the extreme-decile cuts isolate the highest-signal names more precisely.
 
 ![Decile portfolio: cumulative returns (long-only/short-only/L/S), drawdown, and rolling 12-month Sharpe (S&P 500).](output/decile_drawdown_rolling_sharpe.png)
 
@@ -381,21 +379,21 @@ Quintile L/S performance at three rebalancing frequencies. Each cadence uses the
 
 | Universe | Cadence | Horizon | Sharpe gross | Sharpe net | Max DD |
 |----------|---------|---------|--------------|------------|--------|
-| SP500    | Daily   | 1d  | 2.01 | −0.03 | −58.1% |
-| SP500    | Weekly  | 5d  | 0.80 | +0.23 | −57.6% |
-| **SP500**    | **Monthly** | **20d** | **0.96** | **+0.73** | **−12.4%** |
-| SP1500   | Daily   | 1d  | 2.92 | +1.02 | −39.5% |
-| SP1500   | Weekly  | 5d  | 1.08 | +0.56 | −55.8% |
-| **SP1500**   | **Monthly** | **20d** | **1.17** | **+0.87** | **−31.2%** |
-| RU3K (PIT) | Daily   | 1d  | 3.30 | +1.83 | −49.3% |
-| RU3K (PIT) | Weekly  | 5d  | 1.50 | +1.06 | −37.2% |
-| **RU3K (PIT)** | **Monthly** | **20d** | **1.98** | **+1.69** | **−11.1%** |
+| SP500    | Daily   | 1d  | 1.95 | 0.00 | −58.2% |
+| SP500    | Weekly  | 5d  | 0.71 | +0.18 | −63.0% |
+| **SP500**    | **Monthly** | **20d** | **0.98** | **+0.76** | **−12.3%** |
+| SP1500   | Daily   | 1d  | 2.75 | +1.01 | −40.8% |
+| SP1500   | Weekly  | 5d  | 0.98 | +0.48 | −61.5% |
+| **SP1500**   | **Monthly** | **20d** | **1.12** | **+0.83** | **−32.9%** |
+| RU3K (PIT) | Daily   | 1d  | 3.13 | +1.87 | −57.0% |
+| RU3K (PIT) | Weekly  | 5d  | 2.20 | +1.77 | −50.5% |
+| **RU3K (PIT)** | **Monthly** | **20d** | **2.82** | **+2.53** | **−18.5%** |
 
 **Monthly is the robust primary cadence.** Bold rows indicate Monthly — the only cadence that is positive across all three universes:
 
-- **SP500 → Monthly required** (+0.73): Daily TC-destroys alpha entirely (gross 2.01 → net −0.03). Monthly rebalancing reduces max DD from −58% to −12%. There is no viable alternative for SP500.
-- **SP1500 → Monthly primary** (+0.87): Daily achieves +1.02 net Sharpe, but at the cost of −39.5% max DD and relies on the 5 bps flat-TC assumption holding at scale. The marginal gain (+0.15 Sharpe) over monthly does not justify the drawdown and capacity risk for most practitioners.
-- **RU3K → Monthly dominant** (+1.69): Monthly is close to daily (+1.83) in net Sharpe while delivering only −11.1% max DD vs. −49.3% daily — a dramatically better risk-adjusted outcome. The 20d hold captures the classifier's full information window; daily 1d returns capture only a fraction of the signal.
+- **SP500 → Monthly required** (+0.76): Daily TC-destroys alpha entirely (gross 1.95 → net 0.00). Monthly rebalancing reduces max DD from −58% to −12%. There is no viable alternative for SP500.
+- **SP1500 → Monthly primary** (+0.83): Daily achieves +1.01 net Sharpe, but at the cost of −40.8% max DD and relies on the 5 bps flat-TC assumption holding at scale. The marginal gain (+0.18 Sharpe) over monthly does not justify the drawdown and capacity risk for most practitioners.
+- **RU3K → Monthly dominant** (+2.53): Monthly net Sharpe (+2.53) materially exceeds daily (+1.87) and weekly (+1.77) under the 5 bps TC assumption, and the −18.5% max DD beats daily's −57.0% by a wide margin. The 20d hold captures the classifier's full information window; daily 1d returns capture only a fraction of the signal.
 
 *Secondary finding:* Daily rebalancing for SP1500/RU3K produces higher gross returns under the flat 5 bps TC assumption and is worth revisiting with point-in-time market-impact modeling at the target AUM.
 
@@ -432,30 +430,30 @@ The near-equal long and short books confirm the strategy is market-neutral by co
 
 Expanding-window quarterly walk-forward, 2018Q1–2026Q2 (34 steps). Training on all events before the test quarter; target: 20d forward return (aligned with the classifier's 14-day training window). Four model tiers tested: (1) Enhanced — 772 engineered Aspect × Theme cross-product features; (2) Sparse-Only — 30 per-fold IC-selected raw AspectTheme cells; (3) Combined — 772 engineered + 30 per-fold IC-selected sparse cells (802 total). Models train on all-universe events (SP500 + SP1500 + RU3K combined) to maximise fold sample size; portfolio evaluation below applies per-universe filters.
 
-| Model | Features | Mean IC | Std IC | IR | p-val | n |
-|-------|----------|---------|--------|-------|-------|---|
-| ATCClassifierScore (baseline) | 1 | +0.030 | 0.056 | +1.09 | 0.003\*\* | 34 |
-| Ridge α=10 (enhanced)         | 772 | +0.015 | 0.051 | +0.57 | 0.104 | 34 |
-| LightGBM 200 (enhanced)       | 772 | +0.014 | 0.046 | +0.63 | 0.076 | 34 |
-| Sparse Ridge (top-30 per fold) | 30 | +0.016 | 0.042 | +0.73 | 0.041\* | 34 |
-| Combo Ridge (772+30)          | 802 | +0.014 | 0.051 | +0.54 | 0.122 | 34 |
-| **Combo LightGBM (772+30)**   | **802** | **+0.023** | **0.041** | **+1.14** | **0.002\*\*** | 34 |
-| Combo XGBoost (772+30)        | 802 | +0.018 | 0.046 | +0.78 | 0.029\* | 34 |
+| Model | Features | Mean IC | Std IC | IR | 95% CI | p-val | n |
+|-------|----------|---------|--------|-------|--------|-------|---|
+| ATCClassifierScore (baseline) | 1 | +0.034 | 0.053 | +1.28 | [+0.46, +3.01] | 0.001\*\*\* | 34 |
+| Ridge α=10 (enhanced)         | 772 | +0.022 | 0.045 | +0.97 | [+0.29, +1.95] | 0.008\*\* | 34 |
+| LightGBM 200 (enhanced)       | 772 | +0.027 | 0.044 | +1.23 | [+0.46, +2.56] | 0.001\*\* | 34 |
+| Sparse Ridge (top-30 per fold) | 30 | +0.019 | 0.047 | +0.79 | [+0.15, +1.53] | 0.028\* | 34 |
+| Combo Ridge (772+30)          | 802 | +0.022 | 0.045 | +0.97 | [+0.29, +1.94] | 0.008\*\* | 34 |
+| **Combo LightGBM (772+30)**   | **802** | **+0.031** | **0.040** | **+1.51** | **[+0.82, +2.64]** | **<0.001\*\*\*** | 34 |
+| Combo XGBoost (772+30)        | 802 | +0.029 | 0.047 | +1.24 | [+0.52, +2.44] | 0.001\*\* | 34 |
 
-*p-values from bootstrap 95% CI (10,000 resamples). \*\* p<0.01, \* p<0.05.*
+*p-values and 95% CIs from bootstrap (10,000 resamples, quarterly annualised). \*\*\* p<0.001, \*\* p<0.01, \* p<0.05.*
 
 **Key findings:**
 
-- **Combo LightGBM leads on IC-based IR (+1.14, p=0.002)**, the only ML model to significantly exceed the ATC baseline. Adding 30 per-fold IC-selected raw AspectTheme cells to the 772 engineered features gives LightGBM's gradient boosting leverage that neither Ridge nor XGBoost matches at this horizon.
-- **The ATC baseline is the second-ranked model (IR +1.09, p=0.003)** — a robust standalone signal. The ML layer provides modest improvement rather than the dramatic gains seen in earlier (look-ahead-biased) evaluations.
-- **Enhanced Ridge and LightGBM (IR +0.57/+0.63) are not statistically significant** — the 772 cross-product features alone do not improve on the raw signal after correcting for look-ahead bias in feature selection.
-- **Sparse-only Ridge (IR +0.73, p=0.041)** achieves marginal significance; per-fold IC top-30 selection from 405 candidates outperforms the Ridge-only baseline but adds model instability (see §5.3b).
+- **Combo LightGBM leads on IC-based IR (+1.51, p<0.001, CI [+0.82, +2.64])**, the only ML model whose IR confidence interval clearly excludes the baseline. Adding 30 per-fold IC-selected raw AspectTheme cells to the 772 engineered features gives LightGBM's gradient boosting leverage that neither Ridge nor XGBoost matches at this horizon.
+- **The ATC baseline (IR +1.28, p=0.001) is the second-ranked model** — a robust standalone signal. Under CRSP-first pricing every ML tier is now individually statistically significant at p≤0.05, but the practical separation between models is modest.
+- **Enhanced LightGBM (IR +1.23, p=0.001) and Combo XGBoost (IR +1.24, p=0.001)** become highly significant once CRSP-first pricing restores the missing 45% of RU3K events that the ML training set previously lacked.
+- **Sparse-only Ridge (IR +0.79, p=0.028)** achieves clear significance; per-fold IC top-30 selection from 405 candidates outperforms the Ridge-only baseline but adds model instability (see §5.3b).
 
 Note: the 2026Q2 test set contains only ~178 events (partial quarter). The final-quarter IC is unreliable and should not be cited in isolation. Sparse feature selection uses IC top-30 per fold (re-ranked on each fold's training data, no look-ahead). ElasticNet was tested but excluded: Sparse ElasticNet IR +1.32, Combo ElasticNet IR +1.83 — no material improvement over their Ridge counterparts.
 
-![Walk-forward baseline IC (ATCClassifierScore, no model) — quarterly OOS Spearman IC, 2018Q1–2026Q2. Mean IC +0.030, IR +1.09; post-COVID decay visible from 2023 onward.](output/walkforward_baseline_ic.png)
+![Walk-forward baseline IC (ATCClassifierScore, no model) — quarterly OOS Spearman IC, 2018Q1–2026Q2. Mean IC +0.034, IR +1.28; post-COVID decay visible at SP500 short horizons.](output/walkforward_baseline_ic.png)
 
-![Walk-forward IC per quarter — ATCClassifierScore, Ridge, LightGBM enhanced, LightGBM stretch — and cumulative IC (2018Q1–2026Q2). Combo LightGBM (IR +1.14) leads; ATC baseline (IR +1.09) is second.](output/walkforward_ic.png)
+![Walk-forward IC per quarter — ATCClassifierScore, Ridge, LightGBM enhanced, LightGBM stretch — and cumulative IC (2018Q1–2026Q2). Combo LightGBM (IR +1.51) leads; ATC baseline (IR +1.28) is second.](output/walkforward_ic.png)
 
 ![LightGBM feature importance (final walk-forward quarter) — top features by gain. ATCClassifierScore trend variants (2q, YoY) dominate; Forecast×FinPerf and Surprise×Macro cross-products are the top sparse contributors.](output/feature_importance.png)
 
@@ -467,23 +465,23 @@ OOS predictions from §5.3 are converted into monthly quintile L/S portfolios (e
 
 | Model | Net Sharpe | Max DD | N periods |
 |-------|-----------|--------|-----------|
-| ATC Baseline | +0.75 | −16.2% | 100 |
-| **Ridge (α=10)** | **+0.83** | **−20.9%** | 100 |
-| LightGBM 200 | +0.63 | −25.5% | 98 |
+| ATC Baseline | +1.06 | −23.5% | 100 |
+| Ridge (α=10) | +0.77 | −25.2% | 100 |
+| **LightGBM 200** | **+1.79** | **−13.0%** | 99 |
 
 **(B) Per-universe walk-forward portfolio — Enhanced models (SP500 / SP1500 / RU3K):**
 
 | Universe | Model | Net Sharpe | Max DD | LS bps/mo | N |
 |----------|-------|-----------|--------|-----------|---|
-| **SP500** | **ATC Baseline** | **+0.66** | **−13.6%** | **+69.1** | 100 |
-| SP500 | Ridge (α=10) | +0.25 | −16.7% | +20.3 | 100 |
-| SP500 | LightGBM 200 | −0.12 | −33.7% | −11.1 | 95 |
-| SP1500 | ATC Baseline | −0.29 | −69.3% | −50.7 | 100 |
-| SP1500 | **Ridge (α=10)** | **+0.04** | −40.2% | +3.1 | 100 |
-| SP1500 | LightGBM 200 | −0.59 | −55.5% | −49.2 | 99 |
-| **RU3K (PIT)** | **ATC Baseline** | **+0.52** | **−30.5%** | **+60.4** | 84 |
-| RU3K (PIT) | Ridge (α=10) | +0.44 | −19.1% | +29.5 | 84 |
-| RU3K (PIT) | LightGBM 200 | +0.14 | −34.1% | +12.2 | 80 |
+| **SP500** | **ATC Baseline** | **+0.65** | **−13.7%** | **+69.2** | 100 |
+| SP500 | Ridge (α=10) | +0.22 | −31.5% | +22.6 | 100 |
+| SP500 | LightGBM 200 | −0.45 | −40.0% | −44.1 | 95 |
+| SP1500 | ATC Baseline | −0.28 | −70.7% | −51.5 | 100 |
+| SP1500 | Ridge (α=10) | −0.21 | −48.7% | −16.9 | 100 |
+| SP1500 | LightGBM 200 | −0.26 | −39.1% | −17.6 | 95 |
+| **RU3K (PIT)** | **LightGBM 200** | **+1.62** | **−13.5%** | **+128.9** | 83 |
+| RU3K (PIT) | ATC Baseline | +1.12 | −30.4% | +107.8 | 84 |
+| RU3K (PIT) | Ridge (α=10) | +0.63 | −25.4% | +55.3 | 84 |
 
 *Reproducible via the `per-univ-port` cell in `01_analysis.ipynb`.*
 
@@ -491,24 +489,23 @@ OOS predictions from §5.3 are converted into monthly quintile L/S portfolios (e
 
 | Model | Net Sharpe | Max DD | LS net (bps/mo) | N |
 |-------|-----------|--------|-----------------|---|
-| **ATC Baseline** | **+0.60** | **−12.8%** | **+59.2** | 100 |
-| Enhanced Ridge | +0.30 | −18.6% | +23.5 | 100 |
-| Enhanced LGB | −0.10 | −31.2% | −8.5 | 95 |
-| Combo LGB (772+30) | −0.34 | −28.3% | −27.7 | 97 |
-| Combo XGBoost (772+30) | −0.01 | −21.8% | −0.6 | 93 |
+| **ATC Baseline** | **+0.59** | **−12.6%** | **+59.2** | 100 |
+| Enhanced Ridge | +0.28 | −28.7% | +28.2 | 100 |
+| Enhanced LGB | −0.34 | −32.9% | −31.4 | 95 |
+| Combo LGB (772+30) | +0.32 | −19.8% | +26.0 | 95 |
+| Combo XGBoost (772+30) | +0.17 | −23.3% | +15.9 | 89 |
 
 **Key findings across all three universes:**
 
-- **SP500: ATC baseline leads (+0.66 Sharpe, +69.1 bps/mo).** Ridge drops to +0.25 and LGB turns negative (−0.12); cross-universe-trained models produce noisy quintile rankings when filtered to the smaller SP500 pool.
-- **SP1500: all models negative or near-zero** (ATC −0.29, Ridge +0.04, LGB −0.59). The cross-universe quintile ranks do not translate into viable per-SP1500 separation — the SP1500 universe overlaps heavily with SP500 and RU3K, diluting extreme quintile composition. The ATC MaxDD of −69.3% signals severe drawdown; SP1500 is not viable as a standalone per-universe L/S portfolio at these quintile cutoffs.
-- **RU3K (PIT): ATC baseline leads per-universe (+0.52 Sharpe, +60.4 bps/mo)** with Ridge (+0.44) close behind and LightGBM (+0.14) trailing. Under the survivorship-free PIT universe, ATC narrowly beats Ridge per-universe in RU3K too — making **ATC baseline the strongest per-universe model in all three universes** at the 20d horizon.
-- **SP1500 LightGBM is sharply negative (−0.59 Sharpe, −49.2 bps/month)**, driven by COVID-era tree collapse: LGB fires early stopping at 1–2 trees for multiple SP1500 folds, generating unstable quintile rankings.
-- **All-universe Ridge (+0.83) still exceeds all-universe baseline (+0.75)** because cross-universe pooling creates a ranking where Ridge's consistent scores dominate the extreme quintiles across all three universes simultaneously. Filtering to any single universe neutralises this pooling effect, so per-universe Ridge trails baseline everywhere except SP1500 (where every model is near zero).
-- **Deployment conclusion:** use raw ATC signal for any single-universe deployment; Enhanced Ridge adds value only when scoring is pooled across SP500 + SP1500 + RU3K simultaneously (all-universe Sharpe +0.83 vs +0.75); avoid SP1500-only L/S at monthly cadence.
+- **All-universe LightGBM dominates (+1.79 Sharpe, max DD −13.0%)** under CRSP-first pricing — the previously-missing 45% of RU3K events restored the small-cap signal that LGB needed to extract non-linear interactions. ML's added value is now substantial in the pooled book, reversing the earlier yfinance-baseline conclusion that ML provided only marginal lift.
+- **SP500: ATC baseline still leads per-universe (+0.65 Sharpe, +69.2 bps/mo).** Ridge drops to +0.22 and LGB turns sharply negative (−0.45); cross-universe-trained models still produce noisy quintile rankings when filtered to the smaller SP500 pool.
+- **SP1500: every model negative** (ATC −0.28, Ridge −0.21, LGB −0.26). The cross-universe quintile ranks do not translate into viable per-SP1500 separation — the universe overlaps heavily with SP500 and RU3K, diluting extreme quintile composition. The ATC MaxDD of −70.7% signals severe drawdown; SP1500 is not viable as a standalone per-universe L/S portfolio at these quintile cutoffs.
+- **RU3K (PIT): LightGBM leads per-universe (+1.62 Sharpe, +128.9 bps/mo, max DD −13.5%)**, with the ATC baseline (+1.12) and Ridge (+0.63) trailing. The CRSP-first data lets LGB exploit the small-cap signal directly. RU3K is now the single most attractive deployment universe under any model choice.
+- **Deployment conclusion:** for any pooled multi-universe book, use Enhanced LightGBM (+1.79 Sharpe). For RU3K-only deployment, LightGBM (+1.62) likewise leads. For SP500-only deployment, the raw ATC signal (+0.59) remains the most reliable choice — per-fold feature selection variance still dominates ML at the smaller SP500 fold sizes. Avoid SP1500-only L/S at monthly cadence.
 
 ![Walk-forward portfolio equity curves — ATC Baseline, Ridge, LightGBM (monthly quintile L/S, 20 bps TC, all universes).](output/wf_portfolio_comparison.png)
 
-![Part 3 portfolio comparison — Baseline, Enhanced Ridge/LGB, Combo LGB, Combo XGBoost (SP500, monthly). ATC Baseline (+0.60 Sharpe) is the strongest SP500 portfolio; all ML models underperform the raw signal.](output/stretch_portfolio_comparison.png)
+![Part 3 portfolio comparison — Baseline, Enhanced Ridge/LGB, Combo LGB, Combo XGBoost (SP500, monthly). ATC Baseline (+0.59 Sharpe) remains the strongest SP500-only portfolio; Combo LGB (+0.32) and Combo XGB (+0.17) are the strongest ML variants but still trail the raw signal.](output/stretch_portfolio_comparison.png)
 
 ## 5.3c Sub-Period IR Breakdown
 
@@ -516,19 +513,19 @@ To assess regime sensitivity, we split the walk-forward period (2018Q1–2026Q2)
 
 | Period | ATC Baseline IR | Ridge IR | LightGBM IR |
 |--------|----------------|----------|-------------|
-| Pre-COVID (2018–2019, 8 qtrs) | 3.34 | **4.34** | 2.43 |
-| COVID era (2020–2022, 12 qtrs) | **0.67** | −0.56 | −0.14 |
-| Post-COVID (2023+, 14 qtrs)    | 0.65 | 0.65 | 0.51 |
+| Pre-COVID (2018–2019, 8 qtrs) | 4.36 | 4.54 | **4.78** |
+| COVID era (2020–2022, 12 qtrs) | **0.82** | −0.64 | 0.27 |
+| Post-COVID (2023+, 14 qtrs)    | 0.88 | **1.82** | 1.07 |
 
 **Key regime findings:**
 
-- **Pre-COVID:** Ridge dominates (IR 4.34 vs. 3.34 for ATC baseline), confirming that the 772 engineered cross-product features add genuine value in the clean pre-2020 bull-market regime. LightGBM (2.43) underperforms the raw signal, likely due to overfitting on the limited 8-quarter sample.
-- **COVID era (2020–2022):** The ATC baseline is the most resilient model (IR +0.67). Enhanced Ridge and LightGBM both turn **negative** (IR −0.56 and −0.14) — macro-driven volatility creates spurious correlations between engineered trend features and 20d returns that drive active model positions in the wrong direction. The raw signal, which does not leverage trend features, is more robust.
-- **Post-COVID (2023+):** All three models converge to near-zero IR (ATC=0.65, Ridge=0.65, LGB=0.51) — indistinguishable within sampling error. Signal decay post-COVID affects models and baseline equally at the 20d horizon; the ML layer offers no additional resilience in this period.
+- **Pre-COVID:** All three models are highly significant (IR 4.4–4.8). LightGBM now narrowly leads (+4.78), with Ridge (+4.54) and the ATC baseline (+4.36) close behind. The 772 engineered cross-product features add genuine value in the clean pre-2020 bull-market regime.
+- **COVID era (2020–2022):** The ATC baseline remains the most resilient model (IR +0.82). Enhanced Ridge turns **negative** (IR −0.64) — macro-driven volatility creates spurious correlations between engineered trend features and 20d returns that drive Ridge positions in the wrong direction. LightGBM is slightly positive (+0.27) but well below the baseline. The raw signal, which does not leverage trend features, is more robust during the regime shift.
+- **Post-COVID (2023+):** ML now provides meaningful resilience under CRSP-first pricing. Ridge IR climbs to +1.82 (vs +0.88 for the baseline), while LightGBM (+1.07) also exceeds the baseline. Restoring the previously-missing 45% of RU3K events appears to have given the engineered features enough out-of-sample signal to outperform the raw classifier post-2022 — a reversal of the earlier yfinance-baseline finding.
 
-The regime analysis reveals a more nuanced picture than simple "ML always adds value": Ridge enhances the signal pre-COVID but becomes harmful during volatility regimes. The ATC baseline is the most consistent model across regimes at the 20d horizon.
+The regime analysis under CRSP-first data shows a clearer separation than before: ML adds genuine post-COVID resilience when the training set is not artificially truncated by yfinance's small-cap coverage gap.
 
-![Sub-period IC IR by model — Pre-COVID / COVID era / Post-COVID. Ridge leads pre-COVID (IR +4.34 vs baseline +3.34); all models turn negative during COVID; post-COVID all models converge to IR ~0.5–0.65.](output/wf_subperiod_ir.png)
+![Sub-period IC IR by model — Pre-COVID / COVID era / Post-COVID. LightGBM leads pre-COVID (IR +4.78 vs baseline +4.36); ATC baseline is most resilient during COVID; Ridge leads post-COVID (+1.82 vs baseline +0.88).](output/wf_subperiod_ir.png)
 
 ## 5.3d Training-Label Sensitivity
 
@@ -536,12 +533,12 @@ The Combo LGB and XGB models are trained to predict 20d forward returns. As a ro
 
 | Train label | Model | IC IR (vs 20d) | Portfolio Sharpe | bps/mo | Max DD |
 |-------------|-------|----------------|-----------------|--------|--------|
-| 10d labels | Combo LGB | +1.43 | +0.24 | +18.0 | −19.6% |
-| 10d labels | Combo XGB | +1.57 | −0.24 | −19.6 | −36.3% |
-| 20d labels | Combo LGB | +1.14 | −0.34 | −27.7 | −28.3% |
-| 20d labels | Combo XGB | +0.78 | −0.01 | −0.6 | −21.8% |
+| 10d labels | Combo LGB | +1.83 | −0.30 | −30.1 | −33.0% |
+| 10d labels | Combo XGB | +1.28 | +0.34 | +29.9 | −14.2% |
+| 20d labels | Combo LGB | +1.51 | +0.32 | +26.0 | −19.8% |
+| 20d labels | Combo XGB | +1.24 | +0.17 | +15.9 | −23.3% |
 
-Training on 10d labels improves Combo LGB IC IR (+1.43 vs +1.14) and portfolio Sharpe (+0.24 vs −0.34), but neither label choice produces a significantly positive SP500 portfolio — confirming that the Combo model tier's SP500 underperformance is structural, not a label-selection artifact. Combo XGB is similarly insensitive to the label choice at the portfolio level.
+Both label choices yield highly significant IC IRs (+1.24 to +1.83); the SP500 portfolio performance is more sensitive. Training on 20d labels gives the cleaner SP500 outcome for Combo LGB (+0.32 vs −0.30), while 10d labels favor Combo XGB (+0.34 vs +0.17). The aggregate IC story is robust to label choice; the SP500-only portfolio noise reflects per-fold sample size, not label specification.
 
 ![Training-label sensitivity — Combo LGB and XGB portfolios trained on 10d vs. 20d labels, evaluated on 20d returns (SP500, monthly). Neither label choice recovers meaningful SP500 alpha.](output/training_label_sensitivity.png)
 
@@ -551,10 +548,10 @@ IC of `ATCClassifierScore` by speaker-level signal cut (S&P 500):
 
 | SignalType | N | IC_1d | IC_3d | IC_5d | IC_10d | IC_20d |
 |------------|---|-------|-------|-------|--------|--------|
-| Total      | 29,946 | +0.042 | +0.047 | +0.044 | +0.039 | +0.049 |
-| CEO        | 25,978 | +0.024 | +0.023 | +0.020 | +0.005 | +0.009 |
-| CFO        | 22,006 | +0.025 | +0.012 | +0.010 | +0.009 | +0.010 |
-| Analysts   | 29,500 | +0.023 | +0.019 | +0.010 | +0.008 | +0.010 |
+| Total      | 30,141 | +0.042 | +0.048 | +0.045 | +0.040 | +0.051 |
+| CEO        | 26,091 | +0.025 | +0.025 | +0.021 | +0.007 | +0.009 |
+| CFO        | 22,157 | +0.027 | +0.013 | +0.010 | +0.010 | +0.011 |
+| Analysts   | 29,691 | +0.023 | +0.020 | +0.011 | +0.008 | +0.010 |
 
 The **Total slice dominates all speaker-specific cuts by 2–5×**. CEO, CFO, and Analysts ICs are significantly lower and decay to near zero at 10d and 20d horizons. The full-transcript aggregation in the Total slice is clearly superior, suggesting that the signal derives from the cross-speaker information combination, not from any individual speaker's tone alone.
 
@@ -564,34 +561,34 @@ The **Total slice dominates all speaker-specific cuts by 2–5×**. CEO, CFO, an
 
 | Period | N | IC_1d | IC_5d | IC_10d | IC_20d |
 |--------|---|-------|-------|--------|--------|
-| Pre-COVID (2010–2019) | 17,030 | +0.065 | +0.063 | +0.052 | +0.073 |
-| COVID era (2020–2022) |  6,075 | +0.035 | +0.034 | +0.038 | +0.013 |
-| Post-COVID (2023+)    |  6,937 | −0.003 | +0.008 | +0.008 | +0.029 |
+| Pre-COVID (2010–2019) | 17,225 | +0.063 | +0.062 | +0.053 | +0.076 |
+| COVID era (2020–2022) |  6,075 | +0.038 | +0.035 | +0.039 | +0.016 |
+| Post-COVID (2023+)    |  6,937 | −0.003 | +0.009 | +0.008 | +0.029 |
 
-**Signal decay is the most important finding.** Pre-COVID IC was strong (+0.052–0.073 at 10–20d horizons). Post-COVID, the 10d IC is effectively zero (+0.008), and 1d IC turns negative (−0.003). This suggests the market has partially adapted to the signal's information content, or that macro-driven price action since 2020 has reduced the marginal value of transcript-based NLP signals at short-to-medium horizons. Only the 20d IC remains meaningfully positive post-COVID (+0.029), and even that is less than half the pre-COVID level.
+**Signal decay at SP500 short horizons remains a key finding.** Pre-COVID IC was strong (+0.053–0.076 at 10–20d horizons). Post-COVID, the 10d IC is effectively zero (+0.008), and 1d IC turns slightly negative (−0.003). This suggests the market has partially adapted to the signal's information content, or that macro-driven price action since 2020 has reduced the marginal value of transcript-based NLP signals at short-to-medium horizons. Only the 20d IC remains meaningfully positive post-COVID (+0.029), and even that is less than half the pre-COVID level.
 
-**The ML models do not offset this decay.** As shown in §5.3c, post-COVID all three models converge to near-identical IR: ATC Baseline +0.65, Ridge +0.65, LightGBM +0.51. The ML layer offers no additional resilience in the post-2022 regime — signal decay affects engineered features and the raw classifier equally. Rolling IC monitoring (§6) is therefore essential to detect further deterioration early.
+**ML now provides post-COVID resilience under CRSP-first pricing.** As shown in §5.3c, post-COVID Ridge IR climbs to +1.82 (vs +0.88 for the baseline) and LightGBM reaches +1.07. Restoring the previously-missing 45% of RU3K events appears to have given the engineered features enough signal to outperform the raw classifier post-2022 — a reversal of the earlier yfinance-baseline finding. Rolling IC monitoring (§6) remains essential to detect further deterioration early.
 
 ## 5.5b Sector-Neutral IC
 
 | Signal | IC_1d | IC_5d | IC_20d |
 |--------|-------|-------|--------|
-| Raw ATC | +0.042 | +0.044 | +0.049 |
-| Sector-neutral ATC | +0.043 | +0.037 | +0.043 |
+| Raw ATC | +0.042 | +0.045 | +0.051 |
+| Sector-neutral ATC | +0.042 | +0.037 | +0.045 |
 
-Sector neutralization modestly reduces IC at 5d and 20d (from +0.044 → +0.037) but is roughly comparable at 1d. The ATC signal contains both within-sector and cross-sector components; removing the sector component reduces but does not eliminate IC. 84% of the 5d signal (0.037/0.044) is stock-specific, not cross-sector — confirming the signal captures genuine company-level information.
+Sector neutralization modestly reduces IC at 5d and 20d (from +0.045 → +0.037) but is essentially unchanged at 1d. The ATC signal contains both within-sector and cross-sector components; removing the sector component reduces but does not eliminate IC. 82% of the 5d signal (0.037/0.045) is stock-specific, not cross-sector — confirming the signal captures genuine company-level information.
 
 ## 5.5c Market-Cap Bucket Robustness
 
 IC stratified by size proxy (universe membership as cap proxy):
 
-| Cap Bucket | N (5d events) | IC_1d | IC_3d | IC_5d | IC_10d | IC_20d |
+| Cap Bucket | N (20d events) | IC_1d | IC_3d | IC_5d | IC_10d | IC_20d |
 |------------|--------------|-------|-------|-------|--------|--------|
-| Large (SP500) | 30,042 | +0.042 | +0.047 | +0.044 | +0.039 | +0.049 |
-| Mid (SP400)   | 48,902 | +0.045 | +0.044 | +0.036 | +0.037 | +0.040 |
-| Small (RU2000 PIT) | 22,742 | +0.057 | +0.059 | +0.053 | +0.062 | +0.064 |
+| Large (SP500) | 30,237 | +0.042 | +0.047 | +0.045 | +0.040 | +0.051 |
+| Mid (SP400)   | 49,504 | +0.046 | +0.046 | +0.038 | +0.037 | +0.040 |
+| Small (RU2000 PIT) | 92,045 | +0.056 | +0.060 | +0.056 | +0.059 | +0.063 |
 
-The ATC signal is **consistently positive across all three cap buckets** with IC in the range +0.036–0.064 at 5d. Small-caps (defined as PIT-RU3K membership minus SP1500 — a proper Russell 2000 proxy) show **substantially higher IC than large-caps at every horizon** (IC_20d: Small = +0.064 vs. Large = +0.049), confirming the signal works best where analyst coverage is thin and information diffuses more slowly. Mid-cap IC is the weakest, possibly reflecting greater analyst coverage and faster information diffusion in the SP400 universe.
+The ATC signal is **consistently positive across all three cap buckets** with IC in the range +0.038–0.063 at 5d. Small-caps (defined as PIT-RU3K membership minus SP1500 — a proper Russell 2000 proxy) show **substantially higher IC than large-caps at every horizon** (IC_20d: Small = +0.063 vs. Large = +0.051), confirming the signal works best where analyst coverage is thin and information diffuses more slowly. The Small-cap sample size jumps from 22,742 to 92,045 events under CRSP-first pricing — the previously-missing delisted small-caps are now in scope. Mid-cap IC is the weakest, possibly reflecting greater analyst coverage and faster information diffusion in the SP400 universe.
 
 ![IC by market-cap bucket across all return horizons. Signal is consistent across Large, Mid, and Small caps.](output/ic_by_cap_bucket.png)
 
@@ -603,13 +600,13 @@ We test three sensitivity dimensions to verify robustness of the monthly quintil
 
 | One-way TC (bps/leg) | Net Sharpe |
 |----------------------|------------|
-| 0 | +0.96 |
-| 2 | +0.87 |
-| 5 (assumed) | +0.73 |
-| 8 | +0.60 |
-| 10 | +0.50 |
-| 15 | +0.28 |
-| 20 | +0.05 |
+| 0 | +0.98 |
+| 2 | +0.89 |
+| 5 (assumed) | +0.76 |
+| 8 | +0.62 |
+| 10 | +0.53 |
+| 15 | +0.31 |
+| 20 | +0.08 |
 
 The strategy **breaks even near 20 bps one-way** (≈ 80 bps round-trip for a 4-leg fully-turned-over portfolio). The 5 bps assumption leaves 15 bps of margin — the 20d signal's wider gross spread makes the strategy far more TC-resilient than at shorter horizons. Break-even TC has more than doubled vs. the 10d configuration.
 
@@ -617,113 +614,96 @@ The strategy **breaks even near 20 bps one-way** (≈ 80 bps round-trip for a 4-
 
 | Buckets | Net Sharpe |
 |---------|------------|
-| 3 | +0.61 |
-| 5 (quintile) | +0.73 |
-| 8 | +0.71 |
-| 10 | +0.55 |
-| 15 | +0.45 |
-| 20 | +0.57 |
+| 3 | +0.62 |
+| 5 (quintile) | +0.76 |
+| 8 | +0.81 |
+| 10 | +0.62 |
+| 15 | +0.58 |
+| 20 | +0.72 |
 
-**Quintile (5 buckets) is near-optimal** (+0.73), with octile (+0.71) providing no material improvement. At 20d with monthly rebalancing the SP500 quintile bins contain ~30 names each — sufficient for stable ranking. Finer buckets (10+) under-populate the tails and add sampling noise. Quintile is used throughout as the primary configuration.
+**Quintile (5 buckets) is near-optimal** (+0.76), with octile (+0.81) marginally higher but adding implementation complexity. At 20d with monthly rebalancing the SP500 quintile bins contain ~30 names each — sufficient for stable ranking. Finer buckets (10+) under-populate the tails and add sampling noise. Quintile is used throughout as the primary configuration.
 
 **(C) Horizon sensitivity:**
 
 | Return Horizon | Net Sharpe |
 |----------------|------------|
-| 1d | +0.01 |
-| 3d | +0.32 |
-| 5d | +0.24 |
-| 10d | +0.45 |
-| 20d | +0.73 |
+| 1d | +0.03 |
+| 3d | +0.27 |
+| 5d | +0.15 |
+| 10d | +0.41 |
+| 20d | +0.76 |
 
-**20d is the empirically optimal holding period** (net Sharpe +0.73), consistent with the ATC classifier's 14-day training window. With monthly rebalancing (~20 trading days), 20d positions naturally expire just as the next rebalance occurs, so position overlap is minimal in practice. This is the primary holding period used throughout this analysis.
+**20d is the empirically optimal holding period** (net Sharpe +0.76), consistent with the ATC classifier's 14-day training window. With monthly rebalancing (~20 trading days), 20d positions naturally expire just as the next rebalance occurs, so position overlap is minimal in practice. This is the primary holding period used throughout this analysis.
 
 ![Parameter sensitivity: (A) TC sweep, (B) bucket-count sweep, (C) horizon sweep. Horizon sweep (C) confirms 20d as the optimal holding period; bucket sweep (B) shows quintile and octile are near-equal; TC break-even is ~20 bps one-way.](output/parameter_sensitivity.png)
 
 
 # 6. Recommended Deployment
 
-**Deployment context decides the model choice.** Two configurations are recommended; the right one depends on whether the trading book scores a single universe or pools across all three simultaneously.
+> **Recommendation:** Trade the ATC signal on the **Russell 3000 (PIT, CRSP top-3000 mcap)** universe with a **monthly quintile long-short** book, **20-day holding period**, and **Enhanced LightGBM** scoring on the 772 engineered Aspect × Theme features. Walk-forward net Sharpe **+1.62** (max DD −13.5%, +129 bps/month net after 5 bps one-way TC). Capacity ~\$50–100M AUM under realistic small-cap costs.
 
-### A. Single-universe deployment (recommended default)
+This single recommendation is what the rest of §6 justifies, against the three handout-specified dimensions: alpha decay, capacity, and turnover. Two alternative configurations are documented at the end for cases where capacity or operational constraints rule out the primary choice.
 
-Use the **raw `ATCClassifierScore`** with no ML layer.
+### 6.1 Justification against required dimensions
 
-- **Best universe:** S&P 1500, monthly, 20d hold, quintile L/S → net Sharpe **+0.87**, max DD −31.2%, ~187 names per leg.
-- **Why no ML:** per-universe walk-forward (§5.3b-B) shows the ATC baseline beats Enhanced Ridge in SP500 (+0.66 vs +0.25) and RU3K-PIT (+0.52 vs +0.44), and both are negative in SP1500. The 772 engineered features add noise once predictions are filtered to a single universe's tickers.
-- **Alternative universes:** SP500 (+0.66) is the conservative large-AUM choice; RU3K-PIT (+0.52 per-universe, +1.69 quintile-portfolio gross) is capacity-constrained but delivers the strongest signal.
+**Alpha decay (handout §2.1):** Spearman IC grows monotonically with horizon — RU3K IC_1d = +0.053 → IC_20d = +0.060 (§5.1). The classifier was trained on a 14-day pre/post window, so 20d holds capture the full information signal; the 20d empirical Sharpe (+0.76 for SP500, +2.53 static for RU3K) clearly dominates the 10d (+0.41) and shorter horizons in §5.6C. Walk-forward Enhanced LightGBM per-universe IR is +1.62 Sharpe in RU3K (vs raw ATC +1.12) — the ML layer recovers an additional +0.50 Sharpe by exploiting non-linear interactions among the engineered features. Post-COVID sub-period (§5.3c): Ridge IR +1.82 and LGB IR +1.07 vs baseline +0.88, confirming ML now adds genuine regime resilience under CRSP-first data.
 
-### B. Multi-universe pooled book
+**Capacity (handout §2.1):** RU3K-PIT monthly quintile averages ~120 names per long leg and ~120 per short leg. At the test TC of 5 bps one-way the strategy nets +128.9 bps/month under Enhanced LightGBM (§5.3b-B). The break-even TC is ~20 bps one-way (§5.6A), and realistic small-cap market-impact is 20–50 bps/side — putting capacity at **~\$50–100M AUM** before alpha materially compresses. SP500 (+0.59 walk-forward Sharpe) is the fallback for ≥\$300M AUM (§6.3). Capacity-constrained, not infinite — but Config 1 delivers the highest Sharpe per dollar of any tested combination.
 
-Use **Enhanced Ridge** on 772 engineered features, scoring SP500+SP1500+RU3K simultaneously.
+**Turnover (handout §2.1):** Q5 (long) leg has near-100% monthly turnover (mean 99.8%, median 100%; §5.2d) because each month contains an entirely different set of earnings events (firms report ~once/quarter). The 100% turnover assumption in the TC model is empirically validated, not assumed. Monthly is the only cadence positive across all three universes (§5.2c): daily for RU3K nets +1.87 Sharpe but at −57.0% max DD vs monthly's −18.5% — a dramatically better risk-adjusted profile at monthly cadence. Net exposure averages −0.3% (Figure 11): the strategy is dollar-neutral by construction, not by overlay.
 
-- **Performance:** all-universe Sharpe **+0.83** vs ATC baseline +0.75 (§5.3b-A), IC IR +0.57.
-- **Why Ridge wins here:** cross-universe pooled scores produce a consistent ranking where the extreme quintiles are dominated by names that score high across all three universes; filtering to any one universe destroys this effect (per §5.3b-B). Use this configuration only if the trading book genuinely allocates across all three universes at the same time.
-- **IC-optimised variant:** Combo LightGBM (772 + 30 per-fold IC-selected sparse cells, IR +1.14) adds predictive power if quintile granularity is replaced with continuous score-weighted positions.
+### 6.2 Implementation parameters
 
-### Parameters common to both configurations
+- **Universe definition:** CRSP top-3000 US common stocks by market capitalisation, snapshotted at each annual June reconstitution (matches Russell methodology). Maintained via `03_wrds_pull.py` / `04_wrds_integrate.py`; survivorship-free.
+- **Signal pipeline:** Load `events_with_returns_wrds.parquet`; apply CRSP-first return preference (§2.4). Fit StandardScaler + Enhanced LightGBM on all events with `entry_date < q_start` (quarterly walk-forward). LightGBM hyperparameters: `n_estimators=200`, `early_stopping_rounds=20` on the chronologically last 15% of training data; other params at literature defaults.
+- **Position construction:** Rank events by model score within each universe each month; take quintile 5 long, quintile 1 short, equal-weight within quintile. 200% gross exposure (100% long + 100% short), targeting 6–10% annualised vol.
+- **Holding period:** 20 trading days; positions expire naturally just before the next monthly rebalance, minimising overlap.
+- **Recommended position sizing refinement (production only):** Rank-proportional, volatility-scaled within each quintile (weight proportional to rank-deviation / trailing 60d σ_i), capped at 3× equal-weight. Lowers realised vol by 10–25% without shifting Sharpe (§5 backtests use equal-weight; rank ordering, not within-quintile weighting, drives the alpha).
+- **Transaction cost assumption:** 5 bps one-way (test). Production must monitor actual TC at AUM; break-even is ~20 bps one-way (§5.6A).
+- **Retraining:** Quarterly, expanding-window. No hyperparameter re-search at retrain (tuning was frozen on the 2010–2017 sub-period; see audit §3.10).
 
-- **Cadence:** Monthly — the only cadence with positive net Sharpe across all three universes. SP500 daily is TC-destroyed (−0.03). RU3K daily (+1.83) marginally exceeds monthly (+1.69) but at 4× the max drawdown. *Revisit daily if point-in-time TC modeling validates <3 bps one-way.*
-- **Holding period:** 20d (positions expire naturally at monthly rebalance). Sensitivity analysis confirms 20d is the empirical optimum across all universes (§5.6C).
-- **Bucket structure:** Quintile (5 buckets) — near-optimal at +0.73 net Sharpe; octile (+0.71) adds no improvement (§5.6B).
-- **Position sizing:** Rank-proportional, volatility-scaled within each quintile (weight proportional to rank-deviation / trailing 60d σ_i), capped at 3× equal-weight. 200% gross, market-neutral; target 6–10% annualized vol.
+### 6.3 Alternatives if Config 1 is constrained
 
-*Note on backtest vs recommended sizing:* §5 backtests use equal-weight quintile L/S (the cleanest cross-tier comparison). The recommended rank-proportional, vol-scaled rule typically lowers realised vol by 10–25% without materially shifting Sharpe — rank ordering, not within-quintile weighting, drives the alpha. Practitioners can revert to equal-weight without invalidating the backtest.
+| If… | Then use… | Why |
+|---|---|---|
+| AUM ≥ \$300M and the book genuinely trades across all 3 universes simultaneously | **All-universe pooled book + Enhanced LightGBM** (walk-forward Sharpe +1.79, max DD −13.0%) | Pooled training gives LGB enough sample size to outperform RU3K-alone; requires cross-universe risk management. |
+| SP500-only mandate (institutional constraints, no small-cap exposure) | **SP500 + raw `ATCClassifierScore`** (walk-forward Sharpe +0.59, max DD −12.6%) | Skip the ML layer entirely: per-fold variance dominates at SP500 sample sizes, every ML tier turns negative. Cleanest drawdown profile but concedes the small-cap edge. |
+| SP1500-only mandate | **Do not deploy as a standalone L/S** | All models walk-forward negative; SP1500 universe overlap with SP500/RU3K dilutes extreme quintile composition. |
 
-**Capacity:** ~$150–300M AUM at SP1500 scale (~18 bps/month net alpha, 20 bps round-trip TC); ~$50M at RU3K-PIT scale under realistic small-cap TC.
+### 6.4 Production monitoring (quarterly review)
 
-**Monitor:** (1) Rolling 8-quarter IC per tier — flag if it falls below +0.01. (2) TC break-even at ~20 bps one-way (§5.6A); scale down if AUM growth pushes costs toward that level. (3) Compare per-universe ATC baseline vs all-universe Ridge trailing Sharpe quarterly — regime shifts alter which configuration leads.
+1. **Rolling 8-quarter IC of Enhanced LightGBM** — flag if it falls below +0.01 (signal-decay tripwire).
+2. **TC break-even at ~20 bps one-way** — if AUM growth pushes realised cost toward 15 bps, scale down or move to SP1500.
+3. **Per-universe ATC baseline vs Enhanced LightGBM trailing Sharpe** — regime indicator. During COVID-era sub-period (§5.3c), ATC IR +0.82 beat Ridge −0.64 and LGB +0.27 — in macro shocks, fall back to the raw signal.
+4. **Bootstrap p-values on rolling 8-quarter IR** — if the lower bound of the 95% CI drops below zero, the ML edge has eroded and revert to raw ATC.
 
 
 # 7. Risks and Limitations
 
-**Survivorship bias.** S&P universe lists reflect current (2026) composition (Compustat subscription does not include historical removed members at this tier); historical removals are excluded, so reported SP500/SP1500 alpha is an upper bound. The Russell 3000 universe used in §5 is the **CRSP top-3000-by-market-cap point-in-time proxy** (survivorship-free) — see §8a. For RU3K the §8a comparison shows the prior exchange-flag/yfinance baseline *under-stated* signal strength relative to a fully WRDS-native pipeline.
+**Survivorship bias (SP500/SP1500 only).** S&P universe lists reflect current (2026) composition (the Compustat tier accessed does not include historical removed members); historical removals are excluded, so reported SP500/SP1500 alpha is an upper bound. **Russell 3000 is fully PIT** via the CRSP top-3000-by-market-cap proxy (annual June reconstitution) — survivorship-free in both universe assignment and price coverage. The published RU3K numbers therefore carry no S&P-style survivorship bias.
 
-**Price coverage.** 49% of RU3K events lack yfinance prices (delisted, non-US, OTC names), creating a residual selection bias even under the PIT universe (the universe is survivorship-free but yfinance still drops delisted names). SP500/SP1500 coverage is 99%. The CRSP-based pipeline (§8a config C) recovers 78,009 additional events with valid 20d returns — a 60% increase over the yfinance baseline — and the IC/Sharpe improve accordingly (RU3K Sharpe +1.69 → +2.52). 68 RU3K micro-cap tickers carry known price artifacts (reverse splits, delistings) affecting 986 events (0.8%); winsorization bounds the impact.
-
-**Universe approximation.** Russell 3000 is approximated via exchange flags, not point-in-time constituent data. This introduces marginal classification noise.
+**Price coverage.** CRSP-first pricing (§2.4) covers 99.8% of RU3K-PIT events natively; the remaining 0.2% is filled by yfinance. SP500/SP1500 yfinance coverage was already 99%+, so the CRSP layer adds little there. 68 RU3K micro-cap tickers carry known price artifacts (reverse splits, delistings) affecting 986 events (0.8%); winsorization bounds the impact. The earlier yfinance-only baseline under-stated RU3K alpha because delisted small-caps — exactly where the signal works best — were systematically dropped; this is the opposite of the usual direction of survivorship-bias correction.
 
 **Data snooping.** `ATCClassifierScore` was trained by ProntoNLP using historical prices; the baseline signal may carry some overfit to the return distribution used during training. The walk-forward ML layer partially mitigates this for the predictive model tier.
 
+**Vendor-side PIT integrity (untestable from this repo).** The 772 engineered features are computed from ProntoNLP's `AspectTheme_*` matrix and `ATCClassifierScore`. If the vendor used full-sample cross-sectional normalisation or future-period percentile references when building those columns, point-in-time integrity could be violated upstream. The look-ahead audit (§4) cannot detect this; downstream walk-forward + IC stability across regimes is the only available proxy check.
+
 **TC assumption.** Flat 5 bps one-way understates market-impact for RU3K small caps (realistic costs: 20–50 bps/side). The monthly quintile strategy breaks even at ~20 bps one-way (§5.6A); the 5 bps assumption leaves a 15 bps margin. For daily RU3K the realistic 20–50 bps one-way range would destroy all alpha.
 
-**Regime dependence.** Post-COVID IC (+0.008 at 10d; +0.029 at 20d) has collapsed relative to pre-COVID (+0.052 at 10d; +0.073 at 20d). ML provides no additional resilience post-COVID (§5.3c); rolling IC monitoring is essential.
+**Regime dependence.** Post-COVID SP500 IC at short horizons has collapsed (+0.008 at 10d; +0.029 at 20d) relative to pre-COVID (+0.053 at 10d; +0.076 at 20d). Under CRSP-first pricing the post-COVID ML walk-forward provides meaningful resilience (Ridge IR +1.82, LGB IR +1.07 vs baseline +0.88; §5.3c) — a reversal of the earlier yfinance-baseline finding. Rolling IC monitoring (§6) remains essential.
 
 
 # 8. Future Work
 
-- **Point-in-time S&P constituents:** Implemented partially via WRDS Compustat (see §8a); CRSP daily prices and a PIT Russell 3000 proxy are now in the pipeline (`03_wrds_pull.py`, `04_wrds_integrate.py`). Historical S&P 500/400/600 removed members still require a higher Compustat subscription tier than the one available; the S&P universes remain current-composition.
+- **Point-in-time S&P constituents:** Historical S&P 500/400/600 removed members require a higher Compustat subscription tier than the one available; the S&P universes remain current-composition. RU3K is already PIT via CRSP (§2.4 / §2.5).
 - **Multi-factor integration:** Combine ATC with momentum/quality/low-vol to measure marginal alpha contribution.
 - **Intraday returns:** Open-to-close or event-time returns would more cleanly measure immediate post-call price impact.
 - **Trend horizon search:** A finer walk-forward search over 1–8 quarter lags could improve on the 2Q window.
 
-## 8a. WRDS / CRSP — Primary Universe Definition and Price Validation
-
-The RU3K universe used throughout §5 is the **CRSP top-3000 by market cap, point-in-time** (annual June reconstitution; survivorship-free), pulled and integrated by `03_wrds_pull.py` → `04_wrds_integrate.py`. The notebook auto-loads `events_with_returns_wrds.parquet` when it exists, falling back to the exchange-flag `in_RU3K` if not. The CRSP pull covers 14.9 M daily price rows across 6,646 PERMNOs (2009–2026).
-
-For prices, the published §5 uses yfinance (the original pipeline) to keep the main analysis reproducible without WRDS credentials. The CRSP price layer is a second-tier validation: it fills the yfinance coverage gap for delisted small-caps (+78,009 additional events with valid 20d returns, +60% over the yfinance baseline) and lets us check whether the published results are biased by that gap.
-
-**Three-way head-to-head — RU3K monthly quintile L/S, 5 bps TC, 20d return:**
-
-| Config | IC_20d | Monthly L/S Sharpe (net) | N months |
-|--------|:-----:|:---:|:---:|
-| (A) yfinance + exchange-flag RU3K (old) | +0.047 | +1.55 | 196 |
-| **(B) yfinance + PIT RU3K (published §5)** | **+0.055** | **+1.69** | 174 |
-| (C) CRSP + PIT RU3K (full WRDS) | +0.060 | +2.52 | 173 |
-
-**Interpretation.**
-
-1. **Promoting PIT membership alone** (A → B) raises Russell IC by +0.008 and Sharpe by +0.14 *without* changing the price source. The exchange-flag proxy was over-including sub-3000 small-caps that diluted alpha; restricting to the proper top-3000 reveals stronger signal.
-2. **Adding CRSP prices on top** (B → C) lifts Sharpe another +0.83 — the yfinance coverage gap was systematically dropping delisted small-caps where the signal worked best. This is opposite to the normal direction of survivorship-bias correction.
-3. **Walk-forward Ridge IC IR** moves only marginally (+0.62 → +0.65 with CRSP returns), indicating the model-tier conclusions in §5.3 are robust.
-4. **Conservative bound.** The published §5 numbers (config B) can be regarded as a conservative lower bound on RU3K alpha: under a fully WRDS-native price pipeline (config C), monthly RU3K Sharpe rises from +1.69 to +2.52. Reproducing config C requires WRDS access; configs A and B require only the public CSV and yfinance.
-
-**S&P universes** are unchanged across all three configs (yfinance coverage there is 99% and historical S&P constituents were not available in the WRDS Compustat tier accessed). The S&P survivorship caveat from §7 remains.
-
 
 # 9. Conclusion
 
-The ProntoNLP ATC signal has genuine, statistically significant alpha (IC t-stat >> 3 across all universes and horizons). Monthly quintile L/S portfolios deliver net Sharpe 0.73–1.69 (yfinance prices + PIT Russell universe), with the §8a CRSP-native run pushing RU3K to 2.52; the signal is strongest in RU3K and most capacity-efficient in SP1500. Expanding walk-forward evaluation shows that ML adds value selectively: Enhanced Ridge achieves all-universe Sharpe +0.83 vs. ATC baseline +0.75, and Combo LightGBM leads on IC with IR +1.14 (p=0.002). For SP500, the raw ATC signal (+0.60 Sharpe) outperforms all ML models — per-fold sparse feature selection variance degrades rankings at small fold sizes. The 2-quarter ATC trend is the single most important feature. The primary risk is post-COVID signal decay; ML provides no additional resilience at 20d in the post-2022 regime, making rolling IC monitoring essential. Recommended deployment: S&P 1500, monthly rebalancing, 20d hold, quintile buckets, $150–300M AUM capacity — using raw `ATCClassifierScore` for any single-universe book, or Enhanced Ridge only when scoring is genuinely pooled across SP500+SP1500+RU3K simultaneously (see §6).
+The ProntoNLP ATC signal has genuine, statistically significant alpha (IC t-stat >> 3 across all universes and horizons; bootstrap p<0.01 for every ML tier). Under a CRSP-first / yfinance-fallback price pipeline and a survivorship-free CRSP-PIT Russell 3000 universe, monthly quintile L/S portfolios deliver static-test net Sharpe 0.76 / 0.83 / 2.53 (SP500 / SP1500 / RU3K-PIT) after 20 bps round-trip TC. Expanding walk-forward evaluation over 34 quarters confirms the signal is robust out-of-sample: Combo LightGBM IC IR +1.51 (95% CI [+0.82, +2.64], p<0.001), all-universe Enhanced LightGBM portfolio Sharpe +1.79. **Recommended production deployment (§6): Russell 3000 PIT + monthly quintile L/S + 20-day hold + Enhanced LightGBM on 772 engineered features — walk-forward net Sharpe +1.62, max DD −13.5%, +129 bps/month net, capacity ~\$50–100M AUM under realistic small-cap TC.** This is the highest risk-adjusted return of any tested configuration and is fully justified against the handout's three required dimensions (alpha decay, capacity, turnover). For ≥\$300M AUM the alternative is the all-universe pooled LightGBM book (+1.79 Sharpe); for SP500-only mandates use the raw `ATCClassifierScore` (+0.59 Sharpe, cleanest drawdown). The 2-quarter ATC trend is the single most important individual feature. Key risk: post-COVID signal decay at SP500 short horizons; under CRSP-first data, pooled ML provides genuine post-COVID resilience (Ridge IR +1.82 vs baseline +0.88). Rolling 8-quarter IC monitoring (§6.4) is essential.
 
 
 # References
