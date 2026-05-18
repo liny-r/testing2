@@ -11,7 +11,7 @@
 | # | Item | Pass | One-line justification |
 |---|------|:--:|------------------------|
 | 3.1 | Entry timing (AMC vs BMO) | ✅ | `hour ≥ 16 UTC` → next NYSE trading day; `hour < 16 UTC` → same day. Vectorised `np.searchsorted` on SPY-derived calendar. Assertions in `00_data_prep.ipynb` cell 19. |
-| 3.2 | Return columns disjoint from features | ✅ | `{return_1d…return_20d}` ∩ `feature_cols` = ∅ (assertion in cell 24). T2 programmatic test: 0 overlaps / 772 features. |
+| 3.2 | Return columns disjoint from features | ✅ | `{return_1d…return_20d}` ∩ `feature_cols` = ∅ (assertion in cell 25, under the §9b markdown header at cell 24). T2 programmatic test: 0 overlaps / 772 features. |
 | 3.3 | Cross-sectional features point-in-time | ✅ | All cross-sectional features (sector ranks, Z-scores) deferred to `01_analysis.ipynb` walk-forward; computed per fold on training-set events only. |
 | 3.4 | Feature selection inside training | ✅ | IC top-30 sparse selection re-fit on each fold's training data (no full-sample selection). |
 | 3.5 | Imputation and scaling inside training | ✅ | `StandardScaler.fit(train)` → `transform(test)` pattern inside walk-forward loop. |
@@ -51,9 +51,9 @@ The sections below give the full implementation detail for each audit item. The 
 
 **Rule:** `return_Nd` columns are computed *from* entry price. They must never appear in the model feature set.
 
-**Implementation:** Returns computed in cells 22–23 after `entry_date` is locked. Feature columns built in cells 28–29 from AspectTheme matrix and EventScores only.
+**Implementation:** Returns computed in cells 22–23 after `entry_date` is locked. Feature columns built in cells 29–30 from AspectTheme matrix and EventScores only.
 
-**Assertion added (cell 24):**
+**Assertion added (cell 25, immediately after the §9b markdown header at cell 24):**
 - `{return_1d, return_3d, return_5d, return_10d, return_20d}` is disjoint from `feature_cols` ✅
 
 **Status: ✅ PASS**
@@ -126,7 +126,7 @@ Reported **S&P** alpha should be treated as an upper bound. Russell 3000 alpha i
 
 **Rule:** QoQ features (current quarter minus previous quarter) are fine. "Next quarter minus current" is not.
 
-**Implementation:** QoQ deltas computed in cell 29 via `groupby('BESTTICKER')[cols].shift(1)` on data sorted by `entry_date` ascending. Each event's delta uses the **previous** event for that ticker only.
+**Implementation:** QoQ deltas computed in cell 30 via `groupby('BESTTICKER')[cols].shift(1)` on data sorted by `entry_date` ascending. Each event's delta uses the **previous** event for that ticker only.
 
 **Status: ✅ PASS**
 

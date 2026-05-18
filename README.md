@@ -23,6 +23,8 @@ A rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC (Aspect-
 ├── 05_wrds_compare.py          # yfinance vs CRSP head-to-head (validation script; results no longer reported in §5 now that CRSP-first is primary)
 ├── 06_wrds_lookahead_tests.py  # 6 additional tests T9–T14 for the WRDS pipeline
 ├── 07_audit_gap_tests.py       # T15–T17: programmatic backstops for audit §3.4 / §3.9 / §3.10
+├── 08_event_score_ic.py        # Standalone helper: §5.1 EventScore IC table + §5 per-quarter coverage chart
+├── 09_leg_sharpe.py            # Standalone helper: §5.2 / §5.2b per-leg (long / short / L+S) Sharpe table
 ├── Makefile                    # One-command reproduce: make all
 ├── build_charts_pdf.py         # Bundles reports/output/*.png into PDF
 ├── reports/
@@ -32,7 +34,7 @@ A rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC (Aspect-
 │   ├── research_report.md      # Full research write-up (source for PDF)
 │   ├── research_report.pdf     # Compiled report
 │   ├── backtest_charts.pdf     # 20-figure bundle (committed)
-│   └── output/                 # 23 PNG figures (committed, regenerable)
+│   └── output/                 # 24 PNG figures (committed, regenerable): 19 embedded in research_report, 2 chart-bundle-only, 3 look-ahead-test outputs
 ├── data/
 │   ├── universes.json          # SP500 / SP1500 / RU3K ticker lists (committed)
 │   ├── wrds_sp_constituents.parquet     # WRDS S&P current constituents (small, committed)
@@ -68,7 +70,9 @@ pip install wrds psycopg2-binary
 #    Earnings_ATC_until_2026-04-21.csv (~4.5 GB) — request from instructor
 
 # 4. Run everything
-make all    # → reproduces all results from cached parquets, NO data downloads
+make all    # → reproduces all results from cached parquets, NO data downloads.
+            # ~3 min if every PNG in reports/output/ is fresh;
+            # ~70 min if any analysis PNG is missing (falls back to re-running 01_analysis).
 make fresh  # → full pipeline from scratch, fetches yfinance prices (~90 min)
 ```
 
@@ -86,8 +90,11 @@ Individual targets:
 | `make analysis` | Run `01_analysis.ipynb` only (IC, portfolios, walk-forward ML, ~70 min). |
 | `make tests` | Run `02_lookahead_tests.ipynb` (T1–T8 look-ahead audit, ~2 min). |
 | `make audit_gaps` | Run T15–T17 audit-gap tests (`07_audit_gap_tests.py`, ~30 sec). |
+| `make event_score_tables` | Run `08_event_score_ic.py` (~3 sec): emits the §5.1 EventScore IC table and §5 per-quarter coverage chart. Wired into `make all`. |
+| `make leg_sharpe_table` | Run `09_leg_sharpe.py` (~3 sec): emits the §5.2 / §5.2b per-leg (long / short / L+S) Sharpe table. Wired into `make all`. |
 | `make audit` | **Run ALL look-ahead tests (T1–T17) end-to-end without data downloads** (~3 min). Pre-flight checks fail fast if the parquets are missing rather than re-running `00_data_prep`. Includes T9–T14 WRDS tests if `events_with_returns_wrds.parquet` is present, otherwise skips them with a clear message. |
 | `make report` | Compile `reports/research_report.pdf` via pandoc. |
+| `make audit-pdfs` | Compile `reports/look_ahead_audit.pdf` (one-page sign-off) and `reports/look_ahead_audit_detail.pdf` from their markdown sources. Wired into `make all` so the deliverables can never drift behind the `.md`. |
 | `make charts` | Build `reports/backtest_charts.pdf` from PNG bundle. |
 | `make clean` | Remove generated Parquet files and PNGs. |
 | `make wrds` | (optional) Run the full WRDS pipeline: `03_wrds_pull.py` → `04_wrds_integrate.py` → `05_wrds_compare.py` → `06_wrds_lookahead_tests.py`. Requires WRDS credentials (~30 min for the price pull). |

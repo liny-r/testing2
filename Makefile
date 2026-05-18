@@ -14,7 +14,10 @@
 ##   make tests        → look-ahead bias tests (02_lookahead_tests.ipynb; T1–T8)
 ##   make audit_gaps   → audit-gap tests T15–T17 (07_audit_gap_tests.py)
 ##   make audit        → run ALL look-ahead tests (T1–T17) without data downloads
+##   make event_score_tables → §5.1 EventScore IC table + §5 per-quarter chart
+##   make leg_sharpe_table → §5.2 / §5.2b per-leg (long / short / L+S) Sharpe table
 ##   make report       → research_report.pdf from markdown
+##   make audit-pdfs   → look_ahead_audit{,_detail}.pdf from markdown
 ##   make charts       → backtest_charts.pdf from PNG bundle
 ##   make wrds         → optional: WRDS / CRSP pull + integration + audit (T9–T14)
 ##   make clean        → remove generated Parquet / PNG files
@@ -25,17 +28,17 @@ PDF_ENGINE    = xelatex
 PANDOC_FLAGS  = --pdf-engine=$(PDF_ENGINE) -V geometry:margin=1in -V fontsize=11pt \
                 -V "mainfont=STIX Two Text" -V "mathfont=STIX Two Math"
 
-.PHONY: all fresh data analysis tests audit_gaps audit report charts wrds clean
+.PHONY: all fresh data analysis tests audit_gaps audit report audit-pdfs event_score_tables leg_sharpe_table charts wrds clean
 
 ## Default: reproduce all results from cached parquets (no data downloads).
 ## If walkforward_ic.png is missing, this will trigger 01_analysis (~70 min);
 ## if it's present, only the cheap downstream steps run (~3 min).
-all: analysis tests audit_gaps report charts
+all: analysis tests audit_gaps event_score_tables leg_sharpe_table report audit-pdfs charts
 	@echo ""
 	@echo "All deliverables produced. No data downloads were triggered by this build."
 
 ## Full pipeline from scratch — re-fetches yfinance prices via 00_data_prep.
-fresh: data analysis tests audit_gaps report charts
+fresh: data analysis tests audit_gaps event_score_tables leg_sharpe_table report audit-pdfs charts
 
 ## ── Audit gap tests T15–T17 (closes inspection-only gaps from §3.4, §3.9, §3.10)
 ## Order-only prereq on parquet: existence required, freshness not checked.
@@ -101,6 +104,23 @@ reports/look_ahead_audit.md: 02_lookahead_tests.ipynb | reports/output/walkforwa
 
 tests: reports/look_ahead_audit.md
 
+## ── EventScore IC table + per-quarter event count chart (paste-ready)
+## Standalone helper that emits the §5.1 EventScore IC table and the §5 per-quarter
+## coverage figure directly from the parquet, without touching 01_analysis.
+## Order-only prereq on the parquet: existence required, freshness not checked.
+reports/output/events_per_quarter.png: 08_event_score_ic.py | data/events_with_returns.parquet
+	$(PYTHON) 08_event_score_ic.py
+
+event_score_tables: reports/output/events_per_quarter.png
+
+## ── Per-leg Sharpe table (handout §2.2: long-only / short-only / long-short)
+## Standalone helper that emits the §5.2 / §5.2b per-leg Sharpe breakdown
+## directly from the parquet, without re-running 01_analysis. Runtime ~3 sec.
+reports/output/leg_sharpe_table.md: 09_leg_sharpe.py | data/events_with_returns.parquet
+	$(PYTHON) 09_leg_sharpe.py
+
+leg_sharpe_table: reports/output/leg_sharpe_table.md
+
 ## ── Research PDF
 ## Order-only prereq on the analysis output: report doesn't re-run analysis
 ## just to rebuild the PDF from the markdown.
@@ -110,6 +130,22 @@ reports/research_report.pdf: reports/research_report.md | reports/output/walkfor
 		$(PANDOC_FLAGS)
 
 report: reports/research_report.pdf
+
+## ── Audit deliverable PDFs (one-page sign-off + per-item detail)
+## The .md files declare their own page geometry / fontsize via YAML frontmatter;
+## the detail file does not, so it inherits PANDOC_FLAGS. Both rebuild on every
+## change to their source so the deliverable can never drift behind the .md.
+reports/look_ahead_audit.pdf: reports/look_ahead_audit.md
+	cd reports && pandoc look_ahead_audit.md \
+		-o look_ahead_audit.pdf \
+		--pdf-engine=$(PDF_ENGINE)
+
+reports/look_ahead_audit_detail.pdf: reports/look_ahead_audit_detail.md
+	cd reports && pandoc look_ahead_audit_detail.md \
+		-o look_ahead_audit_detail.pdf \
+		$(PANDOC_FLAGS)
+
+audit-pdfs: reports/look_ahead_audit.pdf reports/look_ahead_audit_detail.pdf
 
 ## ── Backtest charts PDF
 reports/backtest_charts.pdf: build_charts_pdf.py | reports/output/walkforward_ic.png
