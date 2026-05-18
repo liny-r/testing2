@@ -11,8 +11,9 @@
 ## Individual targets:
 ##   make data         → data prep only (00_data_prep.ipynb; fetches yfinance prices)
 ##   make analysis     → analysis only (01_analysis.ipynb; ≈ 70 min)
-##   make tests        → look-ahead bias tests (02_lookahead_tests.ipynb)
+##   make tests        → look-ahead bias tests (02_lookahead_tests.ipynb; T1–T8)
 ##   make audit_gaps   → audit-gap tests T15–T17 (07_audit_gap_tests.py)
+##   make audit        → run ALL look-ahead tests (T1–T17) without data downloads
 ##   make report       → research_report.pdf from markdown
 ##   make charts       → backtest_charts.pdf from PNG bundle
 ##   make wrds         → optional: WRDS / CRSP pull + integration + audit (T9–T14)
@@ -24,7 +25,7 @@ PDF_ENGINE    = xelatex
 PANDOC_FLAGS  = --pdf-engine=$(PDF_ENGINE) -V geometry:margin=1in -V fontsize=11pt \
                 -V "mainfont=STIX Two Text" -V "mathfont=STIX Two Math"
 
-.PHONY: all fresh data analysis tests audit_gaps report charts wrds clean
+.PHONY: all fresh data analysis tests audit_gaps audit report charts wrds clean
 
 ## Default: reproduce all results from cached parquets (no data downloads).
 ## If walkforward_ic.png is missing, this will trigger 01_analysis (~70 min);
@@ -40,6 +41,45 @@ fresh: data analysis tests audit_gaps report charts
 ## Order-only prereq on parquet: existence required, freshness not checked.
 audit_gaps: 07_audit_gap_tests.py | data/events_with_returns.parquet
 	$(PYTHON) 07_audit_gap_tests.py
+
+## ── Run ALL look-ahead audit tests (T1–T17) — verify-only, no data downloads.
+## Pre-flight checks that required parquets exist and fails fast if not, so
+## this target NEVER triggers 00_data_prep or any other data fetch.
+## Total runtime ≈ 3 minutes (2 min for T1–T8 notebook, ~30 sec each for T15–T17
+## and the optional T9–T14 WRDS tests).
+audit:
+	@test -f data/events_with_returns.parquet || { \
+	    echo "ERROR: data/events_with_returns.parquet missing."; \
+	    echo "       Run 'make data' or 'make fresh' first (these will fetch yfinance prices)."; \
+	    exit 1; \
+	}
+	@test -f data/prices.parquet || { \
+	    echo "ERROR: data/prices.parquet missing."; \
+	    echo "       Run 'make data' or 'make fresh' first."; \
+	    exit 1; \
+	}
+	@echo "============================================================"
+	@echo "T1-T8   Look-Ahead Bias Test Suite (02_lookahead_tests.ipynb)"
+	@echo "============================================================"
+	jupyter nbconvert $(JUPYTER_FLAGS) 02_lookahead_tests.ipynb
+	@echo ""
+	@echo "============================================================"
+	@echo "T15-T17 Audit Gap Tests          (07_audit_gap_tests.py)"
+	@echo "============================================================"
+	$(PYTHON) 07_audit_gap_tests.py
+	@if [ -f data/events_with_returns_wrds.parquet ]; then \
+	    echo ""; \
+	    echo "============================================================"; \
+	    echo "T9-T14  WRDS / CRSP Pipeline Audit (06_wrds_lookahead_tests.py)"; \
+	    echo "============================================================"; \
+	    $(PYTHON) 06_wrds_lookahead_tests.py; \
+	else \
+	    echo ""; \
+	    echo "[skip] T9-T14 WRDS tests - events_with_returns_wrds.parquet not found."; \
+	    echo "       Run 'make wrds' if you want to verify the WRDS pipeline."; \
+	fi
+	@echo ""
+	@echo "All look-ahead audit tests complete (no data downloads were triggered)."
 
 ## ── Data pipeline (yfinance fetch) — only run on demand via `make data` or `make fresh`
 data/events_with_returns.parquet: 00_data_prep.ipynb

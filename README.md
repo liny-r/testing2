@@ -85,7 +85,8 @@ Individual targets:
 | `make data` | Run `00_data_prep.ipynb` only (CSV → Parquet, fetches yfinance, ~30–60 min). |
 | `make analysis` | Run `01_analysis.ipynb` only (IC, portfolios, walk-forward ML, ~70 min). |
 | `make tests` | Run `02_lookahead_tests.ipynb` (T1–T8 look-ahead audit, ~2 min). |
-| `make audit_gaps` | Run T15–T17 audit-gap tests (`07_audit_gap_tests.py`). |
+| `make audit_gaps` | Run T15–T17 audit-gap tests (`07_audit_gap_tests.py`, ~30 sec). |
+| `make audit` | **Run ALL look-ahead tests (T1–T17) end-to-end without data downloads** (~3 min). Pre-flight checks fail fast if the parquets are missing rather than re-running `00_data_prep`. Includes T9–T14 WRDS tests if `events_with_returns_wrds.parquet` is present, otherwise skips them with a clear message. |
 | `make report` | Compile `reports/research_report.pdf` via pandoc. |
 | `make charts` | Build `reports/backtest_charts.pdf` from PNG bundle. |
 | `make clean` | Remove generated Parquet files and PNGs. |
