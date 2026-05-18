@@ -31,7 +31,7 @@ A rigorous, look-ahead-free backtest of the ProntoNLP Earnings-Call ATC (Aspect-
 │   ├── look_ahead_audit_detail.md  # full per-item evidence (supplementary)
 │   ├── research_report.md      # Full research write-up (source for PDF)
 │   ├── research_report.pdf     # Compiled report
-│   ├── backtest_charts.pdf     # 22-figure bundle (committed)
+│   ├── backtest_charts.pdf     # 20-figure bundle (committed)
 │   └── output/                 # 23 PNG figures (committed, regenerable)
 ├── data/
 │   ├── universes.json          # SP500 / SP1500 / RU3K ticker lists (committed)

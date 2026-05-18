@@ -21,7 +21,7 @@
 | 3.9 | Corporate-action / delisting handling | ✅ | NaN-return events excluded (no roll-forward). Rule documented in `00_data_prep.ipynb` §9b and §7 of the research PDF. |
 | 3.10 | Hyperparameter tuning leaks | ✅ | Initial tuning on 2010–2017 sub-period; walk-forward 2018Q1+ uses frozen hyperparameters. No full-sample grid search. |
 
-**Programmatic verification:** T1–T8 in `02_lookahead_tests.ipynb` and T9–T14 in `06_wrds_lookahead_tests.py` — **all 14 tests PASS**.
+**Programmatic verification:** T1–T8 in `02_lookahead_tests.ipynb`, T9–T14 in `06_wrds_lookahead_tests.py`, and T15–T17 in `07_audit_gap_tests.py` — **all 17 tests PASS**.
 
 **Signed:** Yueqi Lin  ·  **Date:** May 2026  ·  **Course:** LLM-Driven Quant Research — Final Assignment
 
@@ -76,7 +76,9 @@ The sections below give the full implementation detail for each audit item. The 
 
 **Implementation:** No feature selection is performed in `00_data_prep.ipynb`. All selection happens inside the walk-forward loop in `01_analysis.ipynb`, fit on train set, applied to test set.
 
-**Status: ✅ PASS** (deferred to notebook 01 by design)
+**Programmatic backstop:** T15 in `07_audit_gap_tests.py` re-runs the IC top-30 selector on two disjoint training windows and asserts the selected feature sets are data-dependent (Jaccard ≈ 0.05), confirming selection cannot be a constant computed on the full sample.
+
+**Status: ✅ PASS** (deferred to notebook 01 by design; T15 verifies data-dependence)
 
 ---
 
@@ -138,7 +140,9 @@ Reported **S&P** alpha should be treated as an upper bound. Russell 3000 alpha i
 
 **Rule documented:** NaN-return events are excluded from all analyses. This is conservative and avoids assuming liquidity.
 
-**Status: ✅ PASS** (NaN-exclusion rule documented)
+**Programmatic backstop:** T16 in `07_audit_gap_tests.py` greps `00_data_prep.ipynb` and `01_analysis.ipynb` for any `fillna(0)` / `bfill` / `ffill` applied to `return_*` columns and asserts none are present, so a delisted ticker can never be silently treated as a zero-return trade.
+
+**Status: ✅ PASS** (NaN-exclusion rule documented; T16 verifies no mass-fill on returns)
 
 ---
 
@@ -148,7 +152,9 @@ Reported **S&P** alpha should be treated as an upper bound. Russell 3000 alpha i
 
 **Implementation:** Hyperparameter tuning is performed in `01_analysis.ipynb` using only the training portion of each walk-forward fold. The initial tuning sub-period is 2010–2017; walk-forward test begins 2018Q1. No full-sample grid search is performed.
 
-**Status: ✅ PASS** (deferred to notebook 01 by design)
+**Programmatic backstop:** T17 in `07_audit_gap_tests.py` greps `01_analysis.ipynb` for `GridSearchCV`, `RandomizedSearchCV`, `optuna`, and `hyperopt` and asserts none are imported or invoked, ruling out any full-sample tuning library call.
+
+**Status: ✅ PASS** (deferred to notebook 01 by design; T17 verifies no tuning library is invoked)
 
 ---
 
@@ -174,7 +180,7 @@ Reported **S&P** alpha should be treated as an upper bound. Russell 3000 alpha i
 
 ## Sign-Off
 
-I certify that all 10 look-ahead audit items above have been reviewed and pass. The backtest implementation in `00_data_prep.ipynb` and `01_analysis.ipynb` contains no look-ahead bias that I am aware of, and the formal bias tests in `02_lookahead_tests.ipynb` (T1–T8) all pass programmatically.
+I certify that all 10 look-ahead audit items above have been reviewed and pass. The backtest implementation in `00_data_prep.ipynb` and `01_analysis.ipynb` contains no look-ahead bias that I am aware of, and all 17 formal bias tests pass programmatically: T1–T8 in `02_lookahead_tests.ipynb`, T9–T14 in `06_wrds_lookahead_tests.py`, and T15–T17 in `07_audit_gap_tests.py`.
 
 **Signed:** Yueqi Lin  
 **Date:** May 2026  
